@@ -1,11 +1,9 @@
-let csrfToken = "";
 const $ = (id) => document.getElementById(id);
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.method === "POST" && csrfToken) headers.set("X-KIBM-CSRF", csrfToken);
   if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  const response = await fetch(path, { ...options, headers });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
   return body;
@@ -101,49 +99,14 @@ function renderStorage(storage) {
   }
 }
 
-async function boot() {
-  try {
-    const session = await api("/api/session");
-    if (!session.authenticated) {
-      $("login-panel").hidden = false;
-      return;
-    }
-    csrfToken = session.csrf_token;
-    $("dashboard-content").hidden = false;
-    $("logout").hidden = false;
-    await loadDashboard();
-  } catch (error) {
-    $("login-panel").hidden = false;
-    $("login-error").textContent = `Dienst nicht erreichbar: ${error.message}`;
-  }
-}
-
-$("login-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  $("login-error").textContent = "";
-  try {
-    const result = await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("password").value }) });
-    csrfToken = result.csrf_token;
-    $("login-panel").hidden = true;
-    $("dashboard-content").hidden = false;
-    $("logout").hidden = false;
-    await loadDashboard();
-  } catch (error) { $("login-error").textContent = error.message; }
-});
-
-$("logout").addEventListener("click", async () => {
-  try { await api("/api/logout", { method: "POST" }); window.location.reload(); }
-  catch (error) { showError(error.message); }
-});
-
 $("preflight").addEventListener("click", async () => {
   $("preflight-message").textContent = "Prüfung läuft …";
   try {
-    const result = await api("/api/backup/preflight", { method: "POST", body: "{}" });
+    const result = await api("/api/backup/preflight");
     $("preflight-message").textContent = result.blockers.join(" ");
     renderPrinter(result.printer);
     renderStorage(result.storage);
   } catch (error) { $("preflight-message").textContent = error.message; }
 });
 
-boot();
+loadDashboard();

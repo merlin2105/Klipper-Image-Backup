@@ -49,7 +49,7 @@ Never shrink the mounted live root. Never run destructive tools against a source
 
 ### Integration and API
 
-Phase 2 currently has authenticated `GET /api/session`, `GET /api/system`, `GET /api/storage`, and `GET /api/klipper/status` endpoints. `POST /api/backup/preflight` is read-only and never says a backup is ready; it only reports current blockers and that backup is unavailable. Moonraker state is queried through its local HTTP API. Mainsail/Fluidd source files are not edited. A stable link/bookmark or supported configuration mechanism will be chosen after checking each frontend's current extension mechanism.
+Phase 2 currently exposes a read-only dashboard and `GET /api/system`, `GET /api/storage`, `GET /api/klipper/status`, and `GET /api/backup/preflight` endpoints without login. The preflight endpoint never says a backup is ready; it only reports current blockers and that backup is unavailable. Moonraker state is queried through its local HTTP API. Mainsail/Fluidd source files are not edited. A stable link/bookmark or supported configuration mechanism will be chosen after checking each frontend's current extension mechanism. Keep the unauthenticated dashboard on a trusted local network; future backup or write features need a separate access-control design.
 
 ### Verification plan
 

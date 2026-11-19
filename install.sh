@@ -52,6 +52,11 @@ if ! command -v python3 >/dev/null || ! python3 -c 'import venv' >/dev/null 2>&1
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip
 fi
+python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
+  echo "Python ${python_version} ist zu alt. KIBM benötigt Python 3.9 oder neuer." >&2
+  exit 1
+fi
 
 install -d -m 0755 /opt/klipper-image-backup-manager
 if ! id kibm >/dev/null 2>&1; then
@@ -62,25 +67,7 @@ elif [[ ! -f /var/lib/kibm/managed-user ]]; then
   echo "Systembenutzer kibm existiert bereits; aus Sicherheitsgründen wird nicht fortgefahren." >&2
   exit 1
 fi
-install -d -o root -g root -m 0755 /etc
-if [[ ! -f /etc/klipper-image-backup-manager.env ]]; then
-  read -r -s -p "Neues Administratorpasswort (mindestens 12 Zeichen): " password
-  echo
-  if (( ${#password} < 12 )); then echo "Passwort ist zu kurz." >&2; exit 1; fi
-  if [[ ${password} == *'"'* || ${password} == *'\'* || ${password} == *$'\n'* || ${password} == *$'\r'* ]]; then
-    echo 'Passwort darf keine Anführungszeichen, Backslashes oder Zeilenumbrüche enthalten.' >&2
-    exit 1
-  fi
-  session_secret=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
-  umask 077
-  printf 'KIBM_ADMIN_PASSWORD="%s"\nKIBM_SESSION_SECRET="%s"\n' "$password" "$session_secret" > /etc/klipper-image-backup-manager.env
-  chmod 0600 /etc/klipper-image-backup-manager.env
-  unset password session_secret
-fi
-if ! grep -q '^KIBM_SESSION_SECRET=' /etc/klipper-image-backup-manager.env; then
-  printf 'KIBM_SESSION_SECRET="%s"\n' "$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" >> /etc/klipper-image-backup-manager.env
-  chmod 0600 /etc/klipper-image-backup-manager.env
-fi
+rm -f /etc/klipper-image-backup-manager.env
 
 install -d -m 0755 /opt/klipper-image-backup-manager/backend
 cp -a backend/kibm /opt/klipper-image-backup-manager/backend/

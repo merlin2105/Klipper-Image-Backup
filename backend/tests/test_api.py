@@ -1,8 +1,3 @@
-import os
-
-os.environ.setdefault("KIBM_ADMIN_PASSWORD", "test-password-long-enough")
-os.environ.setdefault("KIBM_SESSION_SECRET", "t" * 48)
-
 from fastapi.testclient import TestClient
 
 from kibm import services
@@ -10,12 +5,6 @@ from kibm.main import app
 
 
 client = TestClient(app)
-
-
-def login() -> tuple[str, dict[str, str]]:
-    response = client.post("/api/login", json={"password": os.environ["KIBM_ADMIN_PASSWORD"]}, headers={"Origin": "http://testserver"})
-    assert response.status_code == 200
-    return response.json()["csrf_token"], {"Origin": "http://testserver"}
 
 
 def test_dashboard_is_available_without_auth() -> None:
@@ -30,23 +19,16 @@ def test_favicon_uses_the_static_svg() -> None:
     assert response.headers["location"] == "/static/favicon.svg"
 
 
-def test_private_api_requires_session() -> None:
-    assert client.get("/api/system").status_code == 401
-
-
-def test_login_issues_csrf_token_and_protected_reads_work() -> None:
-    csrf, _ = login()
-    response = client.get("/api/session")
-    assert response.json() == {"authenticated": True, "csrf_token": csrf}
+def test_read_only_api_is_available_without_login() -> None:
     assert client.get("/api/system").status_code == 200
+    assert client.get("/api/storage").status_code == 200
+    assert client.get("/api/klipper/status").status_code == 200
 
 
-def test_preflight_requires_csrf_and_never_claims_backup_ready(monkeypatch) -> None:
-    csrf, origin = login()
+def test_preflight_is_read_only_and_never_claims_backup_ready(monkeypatch) -> None:
     monkeypatch.setattr(services, "klipper_status", lambda: {"safe_to_restart": True, "classification": "ready"})
     monkeypatch.setattr(services, "storage_info", lambda: {"available": True, "system_device": {"path": "/dev/mmcblk0"}})
-    assert client.post("/api/backup/preflight", json={}, headers=origin).status_code == 403
-    result = client.post("/api/backup/preflight", json={}, headers={**origin, "X-KIBM-CSRF": csrf}).json()
+    result = client.get("/api/backup/preflight").json()
     assert result["backup_available"] is False
     assert result["safe_to_prepare_recovery"] is False
 
