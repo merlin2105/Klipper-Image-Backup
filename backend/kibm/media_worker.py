@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import grp
 import json
 import os
 import pwd
@@ -52,6 +53,7 @@ class MediaJob:
 _lock = threading.RLock()
 _job: Optional[MediaJob] = None
 _worker_uid: Optional[int] = None
+_worker_gid: Optional[int] = None
 
 
 def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -420,8 +422,9 @@ class MediaServer(socketserver.ThreadingUnixStreamServer):
 
 
 def main() -> None:
-    global _worker_uid
+    global _worker_uid, _worker_gid
     _worker_uid = pwd.getpwnam("kibm").pw_uid
+    _worker_gid = grp.getgrnam("kibm").gr_gid
     SOCKET_PATH.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     VOLUME_PATH.mkdir(mode=0o750, parents=True, exist_ok=True)
     try:
@@ -429,7 +432,7 @@ def main() -> None:
     except FileNotFoundError:
         pass
     with MediaServer(str(SOCKET_PATH), MediaHandler) as server:
-        os.chown(SOCKET_PATH, 0, _worker_uid)
+        os.chown(SOCKET_PATH, 0, _worker_gid)
         os.chmod(SOCKET_PATH, 0o660)
         server.serve_forever()
 
