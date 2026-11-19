@@ -1,0 +1,30 @@
+[Unit]
+Description=KIBM Pi account authentication broker
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=kibm
+RuntimeDirectory=kibm-auth
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/python3 /opt/klipper-image-backup-manager/backend/kibm/auth_broker.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/etc/passwd /etc/shadow /etc/group /etc/pam.d /etc/security /etc/kibm
+
+[Install]
+WantedBy=multi-user.target

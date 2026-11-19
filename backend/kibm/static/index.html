@@ -18,7 +18,7 @@
       </a>
       <div class="rail-label">ÜBERSICHT</div>
       <a class="nav-link active" href="#dashboard" aria-current="page"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></svg>Systemstatus</a>
-      <a class="nav-link disabled" aria-disabled="true"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12v11H4zM7 5.5V3h6v2.5M7 9h6m-6 3h6"/></svg>Backups <span class="soon">später</span></a>
+      <a class="nav-link" href="#backup"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12v11H4zM7 5.5V3h6v2.5M7 9h6m-6 3h6"/></svg>Image-Backup</a>
       <div class="rail-bottom">
         <span class="version-dot"></span><span>Entwicklerversion 0.1</span>
       </div>
@@ -35,7 +35,7 @@
             <h1>Dein Drucker.<br><em>Im Blick.</em></h1>
             <p class="lede">Systemdiagnose für sichere Backups. Diese Version liest nur — sie verändert nichts am Drucker.</p>
           </div>
-          <div class="read-only-stamp"><svg class="stamp-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10.5 8.5 14 15 6.5"/></svg><span><b>NUR LESEND</b><small>Keine Systemänderungen</small></span></div>
+          <div class="read-only-stamp"><svg class="stamp-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10.5 8.5 14 15 6.5"/></svg><span><b>NUR LESEND</b><small>Keine Änderungen am Pi</small></span></div>
         </section>
 
         <section class="status-strip" aria-label="Gesamtstatus">
@@ -45,12 +45,25 @@
         </section>
 
         <section class="section-head"><div><h2>Backup-Bereitschaft</h2></div><span class="section-note">DIAGNOSE</span></section>
-        <section class="backup-panel panel">
-          <div class="backup-intro"><div><h3>Dein System ist noch nicht backupbereit.</h3><p>Recovery-Boot, Offline-Imaging und PC-Streaming sind noch nicht verfügbar. Erst nach erfolgreichen Hardwaretests kann KIBM eine Image-Erstellung freigeben.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
-          <div class="capability-row"><span><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i>Recovery-Umgebung <b>nicht installiert</b></span><span><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i>Offline-Imaging <b>nicht verfügbar</b></span><span><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i>PC-Streaming <b>nicht verfügbar</b></span></div>
-          <button id="preflight" class="secondary-button" type="button">Voraussetzungen erneut prüfen <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7a5 5 0 1 0 1 3M13 3v4h-4"/></svg></button>
+        <section id="backup" class="backup-panel panel">
+          <div class="backup-intro"><div><h3>Vollständiges SD-Karten-Image</h3><p id="backup-intro-copy">KIBM liest die gesamte System-microSD und überträgt die unkomprimierte Image-Datei direkt an deinen Browser. Auf dem Pi wird keine Image-Datei zwischengespeichert.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
+          <div class="capability-row"><span id="printer-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">Druckerstatus</span><b>wird geprüft</b></span><span id="storage-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">System-microSD</span><b>wird geprüft</b></span><span id="read-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">Leserechte</span><b>wird geprüft</b></span></div>
+          <div class="backup-warning"><b>Live-Abbild:</b> Der Pi bleibt eingeschaltet. KIBM prüft während der Übertragung, dass kein Druck startet. Andere Systemdaten können sich währenddessen ändern.</div>
+          <div class="backup-actions"><button id="start-backup" class="primary-button" type="button" disabled>Image auf PC speichern <span aria-hidden="true">↓</span></button><button id="preflight" class="secondary-button" type="button">Voraussetzungen erneut prüfen <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7a5 5 0 1 0 1 3M13 3v4h-4"/></svg></button></div>
           <div id="preflight-message" class="preflight-message" role="status"></div>
+          <div id="backup-progress" class="backup-progress" hidden><div class="progress-copy"><b id="backup-progress-title">Übertragung wird vorbereitet</b><span id="backup-progress-value">0 %</span></div><progress id="backup-progress-bar" max="100" value="0" aria-label="Fortschritt der Image-Übertragung"></progress><p id="backup-progress-detail" role="status"></p><a id="backup-download" class="download-link" href="#" hidden>Datei im Browser speichern</a></div>
         </section>
+
+        <dialog id="backup-login" class="backup-dialog" aria-labelledby="backup-dialog-title">
+          <form id="backup-form">
+            <h2 id="backup-dialog-title">Mit deinem Pi-Konto anmelden</h2>
+            <p>Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.</p>
+            <div id="pi-auth-fields"><label for="pi-password">Bestehendes Pi-Passwort</label><input id="pi-password" name="password" type="password" autocomplete="current-password" required></div>
+            <label class="confirm-row"><input id="backup-confirm" type="checkbox" required><span>Ich bestätige, dass der Drucker im Standby ist und während der Übertragung nicht gestartet wird.</span></label>
+            <p id="backup-login-error" class="error-text" role="alert"></p>
+            <div class="dialog-actions"><button id="backup-cancel" class="secondary-button" type="button">Abbrechen</button><button class="primary-button" type="submit">Image herunterladen <span aria-hidden="true">↓</span></button></div>
+          </form>
+        </dialog>
 
         <section class="section-head"><div><h2>System</h2></div><span class="section-note">GERÄT & SOFTWARE</span></section>
         <section class="system-grid">
@@ -67,7 +80,7 @@
             <div class="panel-topline"><span class="live-tag"><i></i>MOONRAKER</span></div>
             <div class="printer-state"><span id="printer-icon" class="printer-icon unknown"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="printer-icon-path" d="M12 7v6m0 4h.01"/></svg></span><div><h3 id="printer-title">Wird geprüft …</h3><p id="printer-description">Moonraker-Status wird abgefragt.</p></div></div>
             <div class="state-visual" aria-hidden="true"><span class="state-track"></span><span class="state-point"></span><span class="state-label">PRINT STATS</span></div>
-            <div class="state-footer"><span id="printer-state">UNBEKANNT</span><span id="restart-safety">NEUSTART: GESPERRT</span></div>
+            <div class="state-footer"><span id="printer-state">UNBEKANNT</span><span id="restart-safety">BACKUP: GESPERRT</span></div>
           </article>
         </section>
 
@@ -79,7 +92,7 @@
             <div class="usage-label"><span>Belegung des Systems</span><b id="usage-value">—</b></div>
             <div class="usage-bar"><progress id="usage-bar-fill" max="100" value="0" aria-label="Belegung des Root-Dateisystems">0 %</progress></div>
             <div class="usage-legend"><span><i class="legend-used"></i>Belegt <b id="used-size">—</b></span><span><i class="legend-free"></i>Frei <b id="free-size">—</b></span></div>
-            <div class="estimate-box"><svg class="estimate-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 14 14 4m-7 0h7v7"/></svg><span><b>Minimale Imagegröße</b><small id="image-estimate">Noch nicht berechenbar</small></span><span class="estimate-badge">NICHT VERFÜGBAR</span></div>
+            <div class="estimate-box"><svg class="estimate-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 14 14 4m-7 0h7v7"/></svg><span><b>Vollständige Imagegröße</b><small id="image-estimate">Wird mit dem Systemlaufwerk ermittelt</small></span><span id="image-estimate-badge" class="estimate-badge">ROH-IMAGE</span></div>
           </article>
           <article class="panel partitions-panel">
             <div class="panel-topline"><h3 class="panel-title">Partitionen</h3><span id="partition-count" class="count-tag">0</span></div>

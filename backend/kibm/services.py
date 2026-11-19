@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import platform
+import stat
 import shutil
 import socket
 import subprocess
@@ -136,9 +137,9 @@ def klipper_status() -> dict[str, Any]:
             "state": state,
             "klippy_state": klippy_state,
             "classification": classification,
-            "safe_to_restart": safe,
+            "safe_to_backup": safe,
             "message": "Druckauftrag aktiv oder pausiert." if classification == "active" else (
-                "Drucker bereit." if safe else "Druckerstatus ist unbekannt; Neustart gesperrt."
+                "Drucker bereit." if safe else "Druckerstatus ist unbekannt; Backup gesperrt."
             ),
         }
     except (OSError, urllib.error.URLError, TimeoutError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
@@ -147,23 +148,57 @@ def klipper_status() -> dict[str, Any]:
             "state": None,
             "klippy_state": None,
             "classification": "unknown",
-            "safe_to_restart": False,
-            "message": "Moonraker nicht erreichbar oder Status ungültig; Neustart gesperrt.",
+            "safe_to_backup": False,
+            "message": "Moonraker nicht erreichbar oder Status ungültig; Backup gesperrt.",
         }
 
 
 def backup_preflight() -> dict[str, Any]:
     printer = klipper_status()
     storage = storage_info()
-    blockers = ["Backup-Funktion ist in dieser Version nicht verfügbar."]
-    if not printer["safe_to_restart"]:
-        blockers.append("Druckerstatus erlaubt keinen sicheren Neustart.")
-    if not storage["available"] or not storage["system_device"]:
+    blockers = []
+    if not printer["safe_to_backup"]:
+        blockers.append("Der Drucker muss verbunden und im Standby sein.")
+    device = storage.get("system_device")
+    supported_layout = False
+    source_readable = False
+    if not storage["available"] or not device:
         blockers.append("Systemlaufwerk konnte nicht eindeutig erkannt werden.")
+    elif device.get("path") != "/dev/mmcblk0" or device.get("type") != "disk":
+        blockers.append("Nur die interne microSD unter /dev/mmcblk0 wird derzeit unterstützt.")
+    else:
+        partitions = [item for item in storage["devices"] if item.get("parent") == device["path"]]
+        boot = next((item for item in partitions if "/boot" in item["mountpoints"]), None)
+        root = next((item for item in partitions if "/" in item["mountpoints"]), None)
+        boot_ok = bool(boot and boot.get("filesystem") in {"vfat", "fat", "fat32"})
+        root_ok = bool(root and root.get("filesystem") == "ext4")
+        supported_layout = boot_ok and root_ok
+        if not boot_ok:
+            blockers.append("Die FAT-Bootpartition konnte nicht sicher erkannt werden.")
+        if not root_ok:
+            blockers.append("Die ext4-Systempartition konnte nicht sicher erkannt werden.")
+        try:
+            fd = os.open(device["path"], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            try:
+                if not stat.S_ISBLK(os.fstat(fd).st_mode):
+                    blockers.append("Das erkannte Systemlaufwerk ist kein Blockgerät.")
+                else:
+                    source_readable = True
+            finally:
+                os.close(fd)
+        except OSError:
+            blockers.append("KIBM hat keinen lesenden Zugriff auf die System-microSD.")
     return {
-        "backup_available": False,
+        "backup_available": not blockers,
         "safe_to_prepare_recovery": False,
         "printer": printer,
         "storage": storage,
         "blockers": blockers,
+        "capture_mode": "full_raw_live_image",
+        "image_size_bytes": device.get("size_bytes") if device else None,
+        "checks": {
+            "printer_ready": printer["safe_to_backup"],
+            "system_card_supported": bool(device and device.get("path") == "/dev/mmcblk0" and supported_layout),
+            "read_access": source_readable,
+        },
     }
