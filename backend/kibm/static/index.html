@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111514">
+  <title>KIBM · Systemübersicht</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Hauptnavigation">
+      <a class="brand" href="/" aria-label="KIBM Startseite">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span class="brand-copy"><b>KIBM</b><small>Klipper Image Backup</small></span>
+      </a>
+      <div class="rail-label">ÜBERSICHT</div>
+      <a class="nav-link active" href="#dashboard" aria-current="page"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></svg>Systemstatus</a>
+      <a class="nav-link disabled" aria-disabled="true"><svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12v11H4zM7 5.5V3h6v2.5M7 9h6m-6 3h6"/></svg>Backups <span class="soon">später</span></a>
+      <div class="rail-bottom">
+        <span class="version-dot"></span><span>Entwicklerversion 0.1</span>
+      </div>
+    </aside>
+
+    <main id="dashboard" class="main-content">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Klipper Host</span><i>/</i><b>Systemstatus</b></div>
+        <button id="logout" class="text-button" type="button" hidden>Abmelden <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 12 12 4M5 4h7v7"/></svg></button>
+      </header>
+
+      <section id="login-panel" class="login-panel" hidden>
+        <h1>Willkommen bei <em>KIBM.</em></h1>
+        <p class="lede">Melde dich an, um den Status dieses Klipper-Hosts einzusehen.</p>
+        <form id="login-form">
+          <label for="password">Administratorpasswort</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button class="primary-button" type="submit">Anmelden <span aria-hidden="true">→</span></button>
+          <p id="login-error" class="error-text" role="alert"></p>
+        </form>
+      </section>
+
+      <div id="dashboard-content" hidden>
+        <section class="page-heading">
+          <div>
+            <h1>Dein Drucker.<br><em>Im Blick.</em></h1>
+            <p class="lede">Systemdiagnose für sichere Backups. Diese Version liest nur — sie verändert nichts am Drucker.</p>
+          </div>
+          <div class="read-only-stamp"><svg class="stamp-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10.5 8.5 14 15 6.5"/></svg><span><b>NUR LESEND</b><small>Keine Systemänderungen</small></span></div>
+        </section>
+
+        <section class="status-strip" aria-label="Gesamtstatus">
+          <div class="status-led" id="overall-led"></div>
+          <div><b id="overall-title">Status wird geladen</b><span id="overall-description">Systemdaten werden abgefragt.</span></div>
+          <span class="strip-tag" id="host-name">KLIPPER HOST</span>
+        </section>
+
+        <section class="section-head"><div><h2>Backup-Bereitschaft</h2></div><span class="section-note">DIAGNOSE</span></section>
+        <section class="backup-panel panel">
+          <div class="backup-intro"><div><h3>Dein System ist noch nicht backupbereit.</h3><p>Recovery-Boot, Offline-Imaging und PC-Streaming sind noch nicht verfügbar. Erst nach erfolgreichen Hardwaretests kann KIBM eine Image-Erstellung freigeben.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
+          <div class="capability-row"><span><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i>Recovery-Umgebung <b>nicht installiert</b></span><span><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i>Offline-Imaging <b>nicht verfügbar</b></span><span><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i>PC-Streaming <b>nicht verfügbar</b></span></div>
+          <button id="preflight" class="secondary-button" type="button">Voraussetzungen erneut prüfen <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7a5 5 0 1 0 1 3M13 3v4h-4"/></svg></button>
+          <div id="preflight-message" class="preflight-message" role="status"></div>
+        </section>
+
+        <section class="section-head"><div><h2>System</h2></div><span class="section-note">GERÄT & SOFTWARE</span></section>
+        <section class="system-grid">
+          <article class="panel device-panel">
+            <div class="device-graphic" aria-hidden="true"><div class="board"><i></i><i></i><i></i><i></i><b></b></div><span class="board-pin p1"></span><span class="board-pin p2"></span><span class="board-pin p3"></span><span class="board-pin p4"></span></div>
+            <h3 id="model">Wird erkannt …</h3>
+            <p id="hostname" class="muted">—</p>
+            <div class="panel-rule"></div>
+            <div class="fact-row"><span>Betriebssystem</span><b id="os-name">—</b></div>
+            <div class="fact-row"><span>Kernel</span><b id="kernel">—</b></div>
+            <div class="fact-row"><span>Architektur</span><b id="architecture">—</b></div>
+          </article>
+          <article class="panel printer-panel">
+            <div class="panel-topline"><span class="live-tag"><i></i>MOONRAKER</span></div>
+            <div class="printer-state"><span id="printer-icon" class="printer-icon unknown"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="printer-icon-path" d="M12 7v6m0 4h.01"/></svg></span><div><h3 id="printer-title">Wird geprüft …</h3><p id="printer-description">Moonraker-Status wird abgefragt.</p></div></div>
+            <div class="state-visual" aria-hidden="true"><span class="state-track"></span><span class="state-point"></span><span class="state-label">PRINT STATS</span></div>
+            <div class="state-footer"><span id="printer-state">UNBEKANNT</span><span id="restart-safety">NEUSTART: GESPERRT</span></div>
+          </article>
+        </section>
+
+        <section class="section-head"><div><h2>Speicher</h2></div><span class="section-note">BLOCKGERÄTE & PARTITIONEN</span></section>
+        <section class="storage-layout">
+          <article class="panel storage-summary">
+            <div class="panel-topline"><span id="storage-status" class="small-status">PRÜFUNG</span></div>
+            <div class="disk-heading"><div class="disk-symbol" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M6 7h8M6 10h5M6 13h5"/><circle cx="14.5" cy="13" r=".6"/></svg></div><div><h3 id="disk-name">Wird erkannt …</h3><p id="disk-model">—</p></div><b id="disk-size" class="disk-size">—</b></div>
+            <div class="usage-label"><span>Belegung des Systems</span><b id="usage-value">—</b></div>
+            <div class="usage-bar"><progress id="usage-bar-fill" max="100" value="0" aria-label="Belegung des Root-Dateisystems">0 %</progress></div>
+            <div class="usage-legend"><span><i class="legend-used"></i>Belegt <b id="used-size">—</b></span><span><i class="legend-free"></i>Frei <b id="free-size">—</b></span></div>
+            <div class="estimate-box"><svg class="estimate-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 14 14 4m-7 0h7v7"/></svg><span><b>Minimale Imagegröße</b><small id="image-estimate">Noch nicht berechenbar</small></span><span class="estimate-badge">NICHT VERFÜGBAR</span></div>
+          </article>
+          <article class="panel partitions-panel">
+            <div class="panel-topline"><h3 class="panel-title">Partitionen</h3><span id="partition-count" class="count-tag">0</span></div>
+            <div class="partition-table-wrap" role="region" tabindex="0" aria-label="Partitionstabelle, auf schmalen Bildschirmen horizontal scrollbar"><table><thead><tr><th scope="col">GERÄT</th><th scope="col">DATEISYSTEM</th><th scope="col">GRÖSSE</th><th scope="col">EINHÄNGEPUNKT</th></tr></thead><tbody id="partition-rows"><tr><td colspan="4" class="empty-row">Partitionen werden geladen …</td></tr></tbody></table></div>
+            <p class="partition-footnote">Automatische Partitionserkennung · Nur lesend · Auf dem Smartphone seitlich wischen</p>
+          </article>
+        </section>
+
+        <footer class="footer"><span>KIBM <b>0.1.0</b> · ALPHA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,30 @@
+[Unit]
+Description=Klipper Image Backup Manager read-only service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kibm
+Group=kibm
+EnvironmentFile=/etc/klipper-image-backup-manager.env
+WorkingDirectory=/opt/klipper-image-backup-manager
+ExecStart=/opt/klipper-image-backup-manager/venv/bin/uvicorn kibm.main:app --app-dir /opt/klipper-image-backup-manager/backend --host 0.0.0.0 --port 8765 --no-access-log
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/proc /sys /etc/os-release
+
+[Install]
+WantedBy=multi-user.target

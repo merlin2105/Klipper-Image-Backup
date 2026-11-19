@@ -1,0 +1,42 @@
+{
+  "title": "Wie soll sich die KIBM-Startansicht ordnen?",
+  "question": "Drei Entwürfe verbinden den schnellen Sicherheitsüberblick, ausführliche Systemdetails und eine geführte Backup-Vorbereitung. Welcher Ablauf passt am besten? Alle zeigen ausschließlich echte Messwerte und sperren bei unbekanntem Status.",
+  "options": [
+    {
+      "id": "readiness-first",
+      "label": "Sicherheitsüberblick zuerst",
+      "kicker": "THE ROLL",
+      "lineage": "Status → Systemdetails → Backup-Vorbereitung",
+      "thesis": "Erst erkennen, ob der Drucker sicher ist; dann die Messwerte prüfen und den nächsten Schritt verstehen.",
+      "palette": ["#111514", "#202820", "#c5ee78", "#e7b667"],
+      "materials": ["dunkle Arbeitsfläche", "klare Zustandsfarben"],
+      "viewport": "Ein kompakter Sicherheitsstreifen führt in Gerät und Moonraker-Status. Speicher und Partitionen folgen als vollständige Faktenansicht; die Backup-Vorbereitung schließt mit konkreten Sperrgründen ab.",
+      "risk": "Vertraute Dashboard-Struktur; die geführte Vorbereitung liegt weiter unten.",
+      "html": ".impeccable/mocks/decision/readiness-first.html"
+    },
+    {
+      "id": "storage-first",
+      "label": "Speicherkarte zuerst",
+      "lineage": "Status → SD-Karte und Partitionen → Gerätezustand → Vorbereitung",
+      "thesis": "Die SD-Karte wird zum Hauptbeleg: Gesamtkapazität, Belegung und Partitionen stehen im Zentrum.",
+      "palette": ["#111514", "#243027", "#9dcc76", "#e7b667"],
+      "materials": ["Datendichte", "Kapazitätsmaß und Segmentfarben"],
+      "viewport": "Nach dem Sicherheitsstreifen zeigt eine proportionale Partitionskarte das erkannte Laufwerk; eine zugängliche Tabelle nennt alle Dateisysteme und Einhängepunkte. Druckerstatus und Vorbereitung bleiben direkt daneben bzw. darunter.",
+      "risk": "Die räumliche Partitionsdarstellung braucht eine Tabelle als gleichwertige Alternative.",
+      "html": ".impeccable/mocks/decision/storage-first.html"
+    },
+    {
+      "id": "guided-first",
+      "label": "Backup-Schritte zuerst",
+      "lineage": "Sicherheitsprüfung → Systemdaten → freigeschalteter Backup-Schritt",
+      "thesis": "Die Oberfläche erklärt zuerst die Vorbereitung und zeigt danach genau die Systemfakten, die den Status begründen.",
+      "palette": ["#111514", "#202820", "#c5ee78", "#e7b667"],
+      "materials": ["Schrittstatus", "lesbare Detailwerte"],
+      "viewport": "Ein klarer Prüfpfad zeigt Moonraker und Speichermedium als getrennte Voraussetzungen. Jeder Schritt öffnet seine Messwerte; Imaging bleibt gesperrt, bis Recovery und Hardwaretests tatsächlich verfügbar sind.",
+      "risk": "Der Ablauf darf keinen Fortschritt vortäuschen, solange einzelne Schritte noch nicht implementiert sind.",
+      "html": ".impeccable/mocks/decision/guided-first.html"
+    }
+  ],
+  "buildPath": {"value": "code", "toggle": true},
+  "reroll": {"registers": ["safer", "bolder"]}
+}

@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-19T09:30:00-03:00",
+  "title": "Design System: Klipper Image Backup Manager",
+  "extensions": {
+    "colorMeta": {
+      "canvas": { "role": "neutral", "displayName": "Night Canvas", "canonical": "#111514", "tonalRamp": ["#101312", "#171a19", "#202322", "#292c2b", "#393c3b", "#666968", "#a0a3a2", "#e7e9e8"] },
+      "navigation-rail": { "role": "neutral", "displayName": "Navigation Charcoal", "canonical": "#151a18", "tonalRamp": ["#131816", "#1a1f1d", "#222725", "#2a302e", "#3a403e", "#676c6b", "#a1a5a4", "#e8e9e9"] },
+      "panel": { "role": "neutral", "displayName": "Panel Charcoal", "canonical": "#191f1d", "tonalRamp": ["#171d1b", "#1e2422", "#262c2a", "#2e3432", "#3e4442", "#6a706e", "#a3a7a6", "#e9eae9"] },
+      "panel-raised": { "role": "neutral", "displayName": "Raised Charcoal", "canonical": "#1d2522", "tonalRamp": ["#1a221f", "#212926", "#29312e", "#313936", "#414947", "#6d7471", "#a5aaa8", "#eaebea"] },
+      "separator": { "role": "neutral", "displayName": "Quiet Separator", "canonical": "#2d3632", "tonalRamp": ["#29322e", "#303936", "#38413e", "#404947", "#505957", "#78807e", "#adb2b0", "#eceeed"] },
+      "text": { "role": "neutral", "displayName": "Soft Text", "canonical": "#e7ece7", "tonalRamp": ["#111611", "#1a201a", "#242a24", "#2e342e", "#3e443e", "#6b716b", "#a4aaa4", "#e7ece7"] },
+      "muted": { "role": "neutral", "displayName": "Muted Text", "canonical": "#929d96", "tonalRamp": ["#111511", "#1a1e1b", "#242825", "#2e322f", "#3e4240", "#696e6b", "#929d96", "#e7ebe8"] },
+      "readiness-lime": { "role": "primary", "displayName": "Readiness Lime", "canonical": "#c5ee78", "tonalRamp": ["#19200e", "#283416", "#394b1f", "#516c2b", "#6e9137", "#91bd4d", "#b0dc67", "#ddf4af"] },
+      "caution-amber": { "role": "secondary", "displayName": "Caution Amber", "canonical": "#e7b667", "tonalRamp": ["#21180d", "#382710", "#503816", "#704d1e", "#986a2a", "#bf8738", "#daa752", "#f2d39b"] },
+      "blocked-red": { "role": "tertiary", "displayName": "Blocked Red", "canonical": "#ed7a6d", "tonalRamp": ["#24100e", "#3d1814", "#59221c", "#7c3027", "#a34035", "#c55549", "#e16b5f", "#f5b6af"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Quiet Serif Display", "purpose": "Page and welcome headlines." },
+      "body": { "displayName": "System Body", "purpose": "Explanations, facts, and familiar interface copy." },
+      "data": { "displayName": "Operational Mono", "purpose": "Measurements, device paths, status labels, and compact metadata." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "control-state", "value": "background .15s, border .15s", "purpose": "Subtle hover feedback on the prerequisite recheck action." },
+      { "name": "reduced-motion", "value": "prefers-reduced-motion: reduce disables transitions and animations", "purpose": "Respect reduced-motion preference." }
+    ],
+    "breakpoints": [
+      { "name": "wide", "value": "1500px" },
+      { "name": "tablet", "value": "1000px" },
+      { "name": "mobile", "value": "680px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Prerequisite Recheck Button",
+      "kind": "button",
+      "refersTo": "action-recheck",
+      "description": "Safe read-only action that refreshes prerequisite diagnosis.",
+      "html": "<button class=\"ds-recheck\" type=\"button\">Voraussetzungen erneut prüfen <span aria-hidden=\"true\">↻</span></button>",
+      "css": ".ds-recheck { min-height: 36px; padding: 0 13px; border: 1px solid #536344; border-radius: 5px; background: #293326; color: #d8e6ce; font: 600 12px system-ui, sans-serif; cursor: pointer; transition: background .15s, border .15s; } .ds-recheck:hover { background: #35442e; border-color: #79935f; } .ds-recheck:focus-visible { outline: 2px solid #98bb69; outline-offset: 2px; } .ds-recheck span { margin-left: 9px; color: #c5ee78; }"
+    },
+    {
+      "name": "Read-only Host Status",
+      "kind": "custom",
+      "description": "Communicates current diagnosis state and host identity.",
+      "html": "<div class=\"ds-status\"><i></i><div><b>Diagnose aktiv · Nur lesend</b><span>Recovery-System noch nicht installiert. Es wurden keine Änderungen vorgenommen.</span></div><small>KLIPPER HOST</small></div>",
+      "css": ".ds-status { min-height: 61px; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid #394336; border-radius: 7px; background: linear-gradient(90deg,#20291f,#1a201d 56%); color: #e7ece7; font: 12px system-ui, sans-serif; } .ds-status > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #e7b667; } .ds-status > div { display: flex; flex: 1; flex-direction: column; gap: 3px; } .ds-status span, .ds-status small { color: #9ca79e; } .ds-status small { font: 12px ui-monospace, monospace; letter-spacing: .08em; }"
+    },
+    {
+      "name": "Backup Readiness Panel",
+      "kind": "card",
+      "refersTo": "data-panel",
+      "description": "States unavailable backup capabilities, their blockers, and the next safe action.",
+      "html": "<section class=\"ds-readiness\"><h3>Dein System ist noch nicht backupbereit.</h3><p>Recovery-Boot, Offline-Imaging und PC-Streaming sind noch nicht verfügbar.</p><div class=\"ds-blockers\"><span>× Recovery-Umgebung nicht installiert</span><span>× Offline-Imaging nicht verfügbar</span></div><button class=\"ds-readiness-action\">Voraussetzungen erneut prüfen</button></section>",
+      "css": ".ds-readiness { padding: 21px 22px; border: 1px solid #2d3632; border-radius: 8px; background: #191f1d; color: #e7ece7; font: 12px system-ui, sans-serif; } .ds-readiness h3 { margin: 0 0 6px; font-size: 14px; } .ds-readiness p { margin: 0; color: #929d96; line-height: 1.7; } .ds-blockers { display: flex; flex-wrap: wrap; gap: 12px; padding: 14px 0; margin: 18px 0; border-block: 1px solid #2d3632; color: #bbc4bc; } .ds-blockers span::first-letter { color: #ed7a6d; } .ds-readiness-action { min-height: 36px; padding: 0 13px; border: 1px solid #536344; border-radius: 5px; background: #293326; color: #d8e6ce; font: 600 12px system-ui, sans-serif; } .ds-readiness-action:hover { background: #35442e; border-color: #79935f; } .ds-readiness-action:focus-visible { outline: 2px solid #98bb69; outline-offset: 2px; }"
+    },
+    {
+      "name": "System Data Panel",
+      "kind": "card",
+      "refersTo": "data-panel",
+      "description": "Groups host facts in a low-contrast bordered surface.",
+      "html": "<article class=\"ds-panel\"><h3>Gerätemodell</h3><p>Hostname</p><hr><div><span>Betriebssystem</span><b>Erkannter Wert</b></div><div><span>Architektur</span><b>Erkannter Wert</b></div></article>",
+      "css": ".ds-panel { padding: 18px 20px; border: 1px solid #2d3632; border-radius: 8px; background: #191f1d; color: #e7ece7; font: 12px system-ui, sans-serif; } .ds-panel h3 { margin: 2px 0 4px; font-size: 14px; } .ds-panel p, .ds-panel div span { color: #929d96; } .ds-panel hr { height: 1px; margin: 15px 0 10px; border: 0; background: #2a332f; } .ds-panel div { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; } .ds-panel b { color: #c1cac2; font-weight: 500; }"
+    },
+    {
+      "name": "Storage Usage Bar",
+      "kind": "custom",
+      "description": "Shows measured filesystem usage with lime for the used portion.",
+      "html": "<div class=\"ds-usage\"><div><span>Belegung des Systems</span><b>Belegungswert</b></div><progress max=\"100\" value=\"0\"></progress><small><i></i> Belegt <span>Frei</span></small></div>",
+      "css": ".ds-usage { color: #99a49b; font: 12px system-ui, sans-serif; } .ds-usage > div { display: flex; justify-content: space-between; } .ds-usage b { color: #d0d7d0; font: 12px ui-monospace, monospace; } .ds-usage progress { display: block; width: 100%; height: 5px; margin-top: 8px; appearance: none; border: 0; background: #303a34; } .ds-usage progress::-webkit-progress-bar { background: #303a34; } .ds-usage progress::-webkit-progress-value { background: #c5ee78; } .ds-usage progress::-moz-progress-bar { background: #c5ee78; } .ds-usage small { display: flex; align-items: center; gap: 5px; margin-top: 9px; color: #a7b2a8; font: 12px ui-monospace, monospace; } .ds-usage small i { width: 5px; height: 5px; border-radius: 50%; background: #c5ee78; } .ds-usage small span { margin-left: auto; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Sicherheitsüberblick zuerst",
+    "overview": "KIBM is a restrained operations surface for checking a Klipper host safely. The page makes the read-only boundary, current host status, and backup blockers legible before presenting system and storage details. The product commitment to protect the source installation shapes the visual hierarchy: diagnosis is explicit, and backup creation is clearly unavailable in this release.\n\nNear-black green-tinted backgrounds and charcoal panels keep dense measurements calm. Lime marks confirmed or interactive readiness cues; amber carries caution, and red marks blocked capabilities. A quiet Georgia display face gives the page a human entry point while compact monospace labels make machine values easy to scan.",
+    "keyCharacteristics": [
+      "Read-only status and backup readiness precede system details.",
+      "Dense host measurements sit in quiet, separated panels.",
+      "Status colors communicate readiness, caution, and blocked capability."
+    ],
+    "rules": [
+      { "name": "The State Color Rule", "body": "Use lime, amber, and red to convey actual state; never present an unknown or unavailable state as ready.", "section": "colors" },
+      { "name": "The Measurement Voice Rule", "body": "Keep machine measurements and compact status labels in monospace; keep explanations in the body face.", "section": "typography" },
+      { "name": "The Readiness-First Rule", "body": "Place overall host state and backup blockers before system and storage facts; preserve the safe recheck action beside its explanation.", "section": "layout" },
+      { "name": "The Quiet Surface Rule", "body": "Separate panels with tonal contrast and thin borders; keep elevation understated so status remains the strongest signal.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do communicate read-only behavior and current backup readiness before technical detail.",
+      "Do explain each blocker in plain language and keep the safe prerequisite recheck visible.",
+      "Do show host, filesystem, and partition values only when supplied by the live service.",
+      "Do let the partition table scroll within its own labeled region on narrow screens.",
+      "Do retain the restrained Georgia headline, system body text, and monospace measurement roles."
+    ],
+    "donts": [
+      "Don't imply that backup creation, recovery boot, shrinking, streaming, or restore is available when it is not.",
+      "Don't fill missing measurements with sample values or style unknown status as confirmed readiness.",
+      "Don't let dense storage detail displace the readiness summary in the page hierarchy."
+    ]
+  }
+}

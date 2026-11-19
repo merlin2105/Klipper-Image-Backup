@@ -1,0 +1,71 @@
+# Architecture and implementation phases
+
+## Phase 1: architecture and safety analysis
+
+```mermaid
+flowchart LR
+  Browser[PC browser] -->|Authenticated HTTPS preferred| Service[Unprivileged KIBM service]
+  Service -->|Read-only HTTP| Moonraker[Moonraker on loopback]
+  Service -->|Fixed lsblk query| Host[Linux host metadata]
+  Service -. future: fixed operations only .-> Broker[Privileged broker]
+  Broker -. after hardware prototype .-> Recovery[RAM recovery environment]
+  Recovery -. source offline/read-only .-> Card[SD card]
+  Card -. future streaming protocol .-> Browser
+```
+
+### Components
+
+1. **Normal-mode service** — unprivileged FastAPI process, dashboard, read-only host inspection, Moonraker state check, persistent state store (future), and user confirmation UI (future).
+2. **Privileged broker** — not implemented. Any future root-only work must use a narrow, fixed-operation broker; the HTTP process must never run as root or accept arbitrary commands/paths.
+3. **Recovery environment** — not implemented. Candidate: a separately built initramfs/root filesystem loaded through the Pi firmware's one-shot `tryboot` flow. It must contain networking and the recovery service and leave the source root filesystem unmounted or read-only while imaging.
+4. **Imaging engine** — not implemented. It will validate supported partition tables/filesystems before creating a block-level, bootable image. Shrinking must operate on an offline copy or reconstructed image, never mutate the live source root filesystem.
+5. **PC receiver** — not implemented. A future protocol must acknowledge receipt and digest validation before allowing the Pi to return to normal mode.
+
+### Pi 4 boot strategy
+
+The Pi 4 uses an EEPROM second-stage bootloader. Raspberry Pi's documented `tryboot` mechanism sets a one-shot flag and loads `tryboot.txt` instead of `config.txt`; the flag is cleared before firmware startup. A normal reboot therefore selects the usual `config.txt` again. This suggests a prototype that keeps normal configuration untouched and places an alternate kernel/initramfs selection in `tryboot.txt`.
+
+This is a design candidate, not a validated deployment recipe. Firmware/kernel compatibility, `tryboot.txt` syntax for each supported OS image, EEPROM behavior on older Pi 4 revisions, and recovery network startup need hardware testing. No installer in this repository edits boot files or EEPROM state. If recovery does not start, users need physical access and a documented normal-boot path; unattended remote recovery cannot be promised.
+
+Do not use `autoboot.txt` A/B partition selection as if it were a simple one-shot kernel selector: it selects boot partitions and robust A/B operation requires a dedicated partition layout. Do not write EEPROM configuration or OTP settings.
+
+### State machine
+
+Planned states and allowed forward edges:
+
+```text
+IDLE -> PREFLIGHT -> AWAITING_CONFIRMATION -> PREPARING_RECOVERY
+     -> REBOOTING -> RECOVERY_READY -> BACKUP_RUNNING -> STREAMING
+     -> VERIFYING -> COMPLETED -> RETURNING_TO_KLIPPER -> IDLE
+```
+
+Any failed check transitions to `ERROR` with a reason and no destructive action. An unknown printer state, active/paused print, unsupported partition map, mounted source filesystem, loss of client acknowledgement, or integrity failure blocks continuation. The state machine and persistent recovery journal are not implemented yet; there are currently no transition endpoints.
+
+### Image strategy
+
+Raw copying alone preserves a source card's full capacity and does not meet the smaller-card requirement. The planned offline algorithm is: identify the entire source device and partition table; reject unsupported layouts; verify ext4 offline; copy only after validation; shrink an offline ext filesystem to a measured minimum plus reserve; rewrite only the image's partition table while retaining sector offsets and boot records; validate boundaries, UUID/PARTUUID references, FAT boot data, and image size; then stream and hash the result. Exact tooling and supported layouts remain undecided until synthetic image fixtures prove the geometry and restore workflow.
+
+Never shrink the mounted live root. Never run destructive tools against a source device until its identity and operation plan have been displayed and separately confirmed.
+
+### Integration and API
+
+Phase 2 currently has authenticated `GET /api/session`, `GET /api/system`, `GET /api/storage`, and `GET /api/klipper/status` endpoints. `POST /api/backup/preflight` is read-only and never says a backup is ready; it only reports current blockers and that backup is unavailable. Moonraker state is queried through its local HTTP API. Mainsail/Fluidd source files are not edited. A stable link/bookmark or supported configuration mechanism will be chosen after checking each frontend's current extension mechanism.
+
+### Verification plan
+
+- Unit tests with mocked procfs, lsblk output, and Moonraker responses.
+- API tests for session authentication, CSRF, unknown Moonraker state, and unavailable imaging features.
+- Synthetic disk-image tests before any loop-device use; loop-device tests only in an explicitly isolated environment.
+- Browser checks at desktop and mobile widths, including keyboard focus and console errors.
+- Pi 4 hardware test matrix by board revision, bootloader/EEPROM state, OS release, 32/64-bit kernel, and power interruption.
+- Separately record implementation, unit/API verification, hardware boot, actual restore, and boot-on-printer evidence. A digest is not proof of bootability.
+
+## Phase 2 delivered in this branch
+
+Read-only diagnostics, session login with CSRF protection, a dark responsive UI, storage/partition summaries, Moonraker safety classification, and an unprivileged systemd unit template. Imaging, reboot, recovery installation, and admin actions remain unavailable by design.
+
+## Raspberry Pi references
+
+- [Raspberry Pi boot configuration and TRYBOOT flow](https://www.raspberrypi.com/documentation/computers/config_txt.html)
+- [Raspberry Pi boot files, EEPROM boot flow, and initramfs overview](https://www.raspberrypi.com/documentation/computers/configuration.html)
+- [Raspberry Pi's official image generation tool](https://github.com/RPi-Distro/pi-gen)
