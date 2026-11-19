@@ -31,6 +31,51 @@ function formatBytes(value) {
   return `${size.toLocaleString("de-DE", { maximumFractionDigits: 1 })} ${units[unit]}`;
 }
 
+function renderMetricMeter(id, percent) {
+  const available = Number.isFinite(percent);
+  $(`${id}-meter`).hidden = !available;
+  if (available) $(`${id}-progress`).value = percent;
+}
+
+async function refreshSystemMetrics() {
+  let metrics = {};
+  try {
+    metrics = await api("/api/system/metrics", { signal: AbortSignal.timeout(4000) });
+  } catch {
+    // Keep diagnostics and backup controls usable when live metrics are unavailable.
+  }
+
+  const unavailable = "Nicht verfügbar";
+  const number = value => value.toLocaleString("de-DE", { maximumFractionDigits: 1 });
+  const cpu = metrics.cpu_percent;
+  $("cpu-usage").textContent = Number.isFinite(cpu) ? `${number(cpu)} %` : unavailable;
+  renderMetricMeter("cpu", cpu);
+
+  const memory = metrics.memory;
+  const ramPercent = memory?.total_bytes > 0 ? 100 * memory.used_bytes / memory.total_bytes : null;
+  $("ram-usage").textContent = Number.isFinite(ramPercent)
+    ? `${number(ramPercent)} % · ${formatBytes(memory.used_bytes)} von ${formatBytes(memory.total_bytes)}`
+    : unavailable;
+  renderMetricMeter("ram", ramPercent);
+
+  const temperature = metrics.cpu_temperature_celsius;
+  $("cpu-temperature").textContent = Number.isFinite(temperature) ? `${number(temperature)} °C` : unavailable;
+  const uptime = metrics.uptime_seconds;
+  if (Number.isFinite(uptime)) {
+    const days = Math.floor(uptime / 86400);
+    const hours = Math.floor(uptime / 3600) % 24;
+    const minutes = Math.floor(uptime / 60) % 60;
+    $("system-uptime").textContent = days ? `${days} T ${hours} Std` : `${hours} Std ${minutes} Min`;
+  } else {
+    $("system-uptime").textContent = unavailable;
+  }
+}
+
+async function pollSystemMetrics() {
+  if (document.visibilityState === "visible") await refreshSystemMetrics();
+  window.setTimeout(pollSystemMetrics, 5000);
+}
+
 function showError(message) {
   $("overall-title").textContent = "Systemprüfung nicht vollständig";
   $("overall-description").textContent = message;
@@ -556,6 +601,7 @@ $("usb-eject").addEventListener("click", async () => {
 });
 
 loadDashboard();
+pollSystemMetrics();
 window.setInterval(() => {
   if (document.visibilityState === "visible") loadUsbDevices();
 }, 3000);

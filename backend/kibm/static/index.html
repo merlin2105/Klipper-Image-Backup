@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=backup-choices">
-  <script src="/static/app.js?v=backup-choices" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=system-metrics">
+  <script src="/static/app.js?v=system-metrics" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -95,6 +95,14 @@
             <div class="fact-row"><span>Betriebssystem</span><b id="os-name">—</b></div>
             <div class="fact-row"><span>Kernel</span><b id="kernel">—</b></div>
             <div class="fact-row"><span>Architektur</span><b id="architecture">—</b></div>
+            <div class="panel-rule"></div>
+            <h4 class="metrics-title">Aktuelle Auslastung</h4>
+            <div class="fact-row"><span>CPU</span><b id="cpu-usage">—</b></div>
+            <div class="usage-bar" id="cpu-meter" hidden><progress id="cpu-progress" max="100" value="0" aria-label="CPU-Auslastung"></progress></div>
+            <div class="fact-row"><span>Arbeitsspeicher</span><b id="ram-usage">—</b></div>
+            <div class="usage-bar" id="ram-meter" hidden><progress id="ram-progress" max="100" value="0" aria-label="Arbeitsspeicherauslastung"></progress></div>
+            <div class="fact-row"><span>CPU-Temperatur</span><b id="cpu-temperature">—</b></div>
+            <div class="fact-row"><span>Laufzeit</span><b id="system-uptime">—</b></div>
           </article>
           <article class="panel printer-panel">
             <div class="panel-topline"><span class="live-tag"><i></i>MOONRAKER</span></div>

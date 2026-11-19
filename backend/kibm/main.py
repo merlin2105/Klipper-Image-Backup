@@ -152,6 +152,11 @@ async def get_storage():
     return services.storage_info()
 
 
+@app.get("/api/system/metrics")
+def get_system_metrics():
+    return services.system_metrics()
+
+
 @app.get("/api/klipper/status")
 async def get_klipper_status():
     return services.klipper_status()

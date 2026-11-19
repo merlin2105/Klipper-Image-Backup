@@ -8,6 +8,7 @@ import stat
 import shutil
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -40,6 +41,74 @@ def system_info() -> dict[str, Any]:
         "architecture": platform.machine(),
         "service_mode": "normal",
         "recovery_available": False,
+    }
+
+
+def _cpu_counters() -> Optional[tuple[int, int]]:
+    lines = (_read_text("/proc/stat") or "").splitlines()
+    if not lines:
+        return None
+    fields = lines[0].split()
+    if len(fields) < 6 or fields[0] != "cpu":
+        return None
+    try:
+        ticks = [int(value) for value in fields[1:9]]
+        return sum(ticks), ticks[3] + ticks[4]
+    except ValueError:
+        return None
+
+
+def _cpu_usage() -> Optional[float]:
+    start = _cpu_counters()
+    if start is None:
+        return None
+    time.sleep(0.25)
+    end = _cpu_counters()
+    if end is None:
+        return None
+    elapsed = end[0] - start[0]
+    idle = end[1] - start[1]
+    if elapsed <= 0 or not 0 <= idle <= elapsed:
+        return None
+    return round(100 * (elapsed - idle) / elapsed, 1)
+
+
+def _memory_usage() -> Optional[dict[str, int]]:
+    values = {}
+    for line in (_read_text("/proc/meminfo") or "").splitlines():
+        key, _, value = line.partition(":")
+        if key in {"MemTotal", "MemAvailable"}:
+            try:
+                values[key] = int(value.split()[0]) * 1024
+            except (IndexError, ValueError):
+                return None
+    total, available = values.get("MemTotal", 0), values.get("MemAvailable", -1)
+    if total <= 0 or not 0 <= available <= total:
+        return None
+    return {"used_bytes": total - available, "total_bytes": total}
+
+
+def _cpu_temperature() -> Optional[float]:
+    for zone in Path("/sys/class/thermal").glob("thermal_zone*"):
+        if _read_text(str(zone / "type")) not in {"cpu-thermal", "cpu_thermal"}:
+            continue
+        try:
+            return int(_read_text(str(zone / "temp")) or "") / 1000
+        except ValueError:
+            continue
+    return None
+
+
+def system_metrics() -> dict[str, Any]:
+    try:
+        uptime = int(float((_read_text("/proc/uptime") or "").split()[0]))
+    except (IndexError, ValueError, OverflowError):
+        uptime = None
+    return {
+        "cpu_percent": _cpu_usage(),
+        "memory": _memory_usage(),
+        "cpu_temperature_celsius": _cpu_temperature(),
+        "uptime_seconds": uptime,
     }
 
 
