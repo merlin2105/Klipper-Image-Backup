@@ -185,5 +185,7 @@ then
   exit 1
 fi
 ip_address=$(hostname -I 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}')
-echo "KIBM läuft unter https://${ip_address:-<drucker-ip>}:8765"
+echo "Installation erfolgreich. KIBM-Webportal im Browser öffnen:"
+echo "https://${ip_address:-<drucker-ip>}:8765"
+echo "Port 90 bleibt für die Klipper-Oberfläche (Mainsail/Fluidd)."
 echo "Beim ersten Browseraufruf das lokale Zertifikat einmalig bestätigen."
