@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import shutil
@@ -10,6 +11,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _read_text(path: str) -> str | None:
@@ -51,7 +54,7 @@ def _flatten_devices(devices: list[dict[str, Any]], parent: str | None = None) -
             "type": device.get("type"),
             "size_bytes": device.get("size"),
             "filesystem": device.get("fstype"),
-            "mountpoints": device.get("mountpoints") or [],
+            "mountpoints": device.get("mountpoints") or ([device["mountpoint"]] if device.get("mountpoint") else []),
             "model": device.get("model"),
             "removable": bool(device.get("rm", False)),
             "read_only": bool(device.get("ro", False)),
@@ -64,7 +67,7 @@ def _flatten_devices(devices: list[dict[str, Any]], parent: str | None = None) -
 def storage_info() -> dict[str, Any]:
     try:
         result = subprocess.run(
-            ["lsblk", "--json", "--bytes", "--output", "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,RM,RO"],
+            ["lsblk", "--json", "--bytes", "--output", "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,RM,RO"],
             check=True,
             capture_output=True,
             text=True,
@@ -85,6 +88,7 @@ def storage_info() -> dict[str, Any]:
             "shrinking_available": False,
         }
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError):
+        logger.exception("Could not read block devices with lsblk")
         return {
             "available": False,
             "devices": [],
@@ -115,7 +119,7 @@ def klipper_status() -> dict[str, Any]:
         if not isinstance(stats, dict) or not isinstance(stats.get("state"), str):
             raise ValueError("Moonraker returned no print state")
         state = stats["state"].lower()
-        klippy_state = info.get("klippy_state")
+        klippy_state = info.get("klippy_state") or info.get("state")
         safe_states = {"standby", "complete", "cancelled", "idle"}
         active_states = {"printing", "paused"}
         if state in active_states:
