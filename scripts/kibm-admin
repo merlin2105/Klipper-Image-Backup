@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Verwendung: sudo kibm-admin {status|logs|restart|update}" >&2
+  exit 2
+}
+
+[[ $# -eq 1 ]] || usage
+
+case "$1" in
+  status)
+    exec /usr/bin/systemctl status kibm.service kibm-media.service kibm-auth.service --no-pager -l
+    ;;
+  logs)
+    exec /usr/bin/journalctl -u kibm.service -u kibm-media.service -u kibm-auth.service -n 100 --no-pager
+    ;;
+  restart)
+    /usr/bin/systemctl restart kibm-media.service kibm.service
+    exec /usr/bin/systemctl status kibm.service kibm-media.service --no-pager -l
+    ;;
+  update)
+    operator=${SUDO_USER:-}
+    [[ -n "$operator" && "$operator" != root ]] || { echo "Pi-Benutzer konnte nicht erkannt werden." >&2; exit 1; }
+    workdir=$(/usr/bin/mktemp -d /tmp/kibm-admin-update.XXXXXX)
+    trap '/usr/bin/rm -rf -- "$workdir"' EXIT
+    /usr/bin/curl --fail --location --silent --show-error \
+      https://codeload.github.com/merlin2105/Klipper-Image-Backup/tar.gz/refs/heads/main \
+      --output "$workdir/source.tar.gz"
+    /usr/bin/mkdir "$workdir/source"
+    /usr/bin/tar --extract --gzip --file "$workdir/source.tar.gz" --strip-components=1 --directory "$workdir/source"
+    cd "$workdir/source"
+    SUDO_USER="$operator" /usr/bin/bash ./install.sh
+    ;;
+  *) usage ;;
+esac

@@ -78,8 +78,22 @@ if [[ -z ${admin_user} || ${admin_user} == root ]] || ! id "${admin_user}" >/dev
   echo "Der Pi-Benutzer konnte nicht erkannt werden. Bitte direkt als Benutzer anmelden und mit 'sudo ./install.sh' installieren." >&2
   exit 1
 fi
+if [[ ! ${admin_user} =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
+  echo "Der Pi-Benutzername enthält Zeichen, die nicht sicher in sudoers verwendet werden können." >&2
+  exit 1
+fi
 
 install -d -m 0755 /opt/klipper-image-backup-manager
+install -o root -g root -m 0755 scripts/kibm-admin /usr/local/sbin/kibm-admin
+sudoers_tmp=$(mktemp /etc/sudoers.d/kibm-admin.XXXXXX)
+printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/kibm-admin\n' "$admin_user" > "$sudoers_tmp"
+chmod 0440 "$sudoers_tmp"
+if ! visudo -cf "$sudoers_tmp"; then
+  rm -f "$sudoers_tmp"
+  echo "KIBM-Verwaltungsfreigabe konnte nicht sicher geprüft werden." >&2
+  exit 1
+fi
+mv "$sudoers_tmp" /etc/sudoers.d/kibm-admin
 if ! id kibm >/dev/null 2>&1; then
   useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin kibm
   install -d -o root -g root -m 0755 /var/lib/kibm
@@ -189,3 +203,4 @@ echo "Installation erfolgreich. KIBM-Webportal im Browser öffnen:"
 echo "https://${ip_address:-<drucker-ip>}:8765"
 echo "Port 90 bleibt für die Klipper-Oberfläche (Mainsail/Fluidd)."
 echo "Beim ersten Browseraufruf das lokale Zertifikat einmalig bestätigen."
+echo "KIBM-Administration über SSH: sudo kibm-admin {status|logs|restart|update}"

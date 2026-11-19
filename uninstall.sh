@@ -18,6 +18,7 @@ systemctl disable --now kibm-media.service 2>/dev/null || true
 rm -f /etc/systemd/system/kibm.service
 rm -f /etc/systemd/system/kibm-auth.service /etc/pam.d/kibm
 rm -f /etc/systemd/system/kibm-media.service /etc/modules-load.d/kibm-loop.conf
+rm -f /etc/sudoers.d/kibm-admin /usr/local/sbin/kibm-admin
 systemctl daemon-reload
 rm -rf /opt/klipper-image-backup-manager
 rm -f /etc/klipper-image-backup-manager.env
