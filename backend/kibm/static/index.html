@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=usb-status">
-  <script src="/static/app.js?v=usb-status" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=usb-capacity">
+  <script src="/static/app.js?v=usb-capacity" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -73,6 +73,7 @@
             <p class="usb-format-note"><b>USB-Stick wird als exFAT formatiert.</b> Vorhandene Daten auf dem ausgewählten Stick werden gelöscht. exFAT ermöglicht die Nutzung unter Windows, macOS und Linux.</p>
           </div>
           <div class="backup-actions"><button id="start-backup" class="primary-button" type="button" disabled>Image auf PC speichern <span aria-hidden="true">↓</span></button><button id="preflight" class="secondary-button" type="button">Voraussetzungen erneut prüfen <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7a5 5 0 1 0 1 3M13 3v4h-4"/></svg></button></div>
+          <div id="usb-capacity-message" class="usb-capacity-message" role="status"></div>
           <div id="preflight-message" class="preflight-message" role="status"></div>
           <div id="backup-progress" class="backup-progress" hidden><div class="progress-copy"><b id="backup-progress-title">Übertragung wird vorbereitet</b><span id="backup-progress-value">0 %</span></div><progress id="backup-progress-bar" max="100" value="0" aria-label="Fortschritt der Image-Übertragung"></progress><p id="backup-progress-detail" role="status"></p><a id="backup-download" class="download-link" href="#" hidden>Datei im Browser speichern</a><div id="usb-results" class="usb-results" hidden></div><button id="usb-eject" class="secondary-button" type="button" hidden>USB-Stick sicher auswerfen</button></div>
         </section>

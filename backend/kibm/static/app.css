@@ -46,3 +46,10 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 .usb-detection-status[data-state="detected"] .usb-detection-icon { color: var(--acid); border-color: color-mix(in srgb, var(--line), var(--acid) 25%); }
 .usb-detection-status[data-state="unavailable"] .usb-detection-icon { color: var(--amber); }
 @media (max-width: 680px) { .usb-detection-status { margin-left: 0; } }
+.usb-capacity-message {
+  margin-top: 10px;
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.usb-capacity-message:empty { display: none; }

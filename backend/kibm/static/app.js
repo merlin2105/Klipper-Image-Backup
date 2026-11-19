@@ -107,11 +107,7 @@ async function loadUsbDevices() {
       $("usb-device").replaceChildren(new Option("USB-Stick auswählen", ""));
       for (const device of usbDevices) {
         const detail = device.model?.trim() || device.path;
-        const required = requiredUsbCapacity();
-        const tooSmall = !required || Number(device.size_bytes) < required;
-        const option = new Option(`${detail} · ${formatBytes(device.size_bytes)}${tooSmall ? " · zu klein" : ""}`, device.path);
-        option.disabled = tooSmall;
-        $("usb-device").append(option);
+        $("usb-device").append(new Option(`${detail} · ${formatBytes(device.size_bytes)}`, device.path));
       }
       if (usbDevices.some((device) => device.path === selectedPath)) $("usb-device").value = selectedPath;
     }
@@ -159,15 +155,16 @@ function selectedUsbDevice() {
   return usbDevices.find((device) => device.path === $("usb-device").value) || null;
 }
 
-function requiredUsbCapacity() {
+function requiredUsbCapacity(shrink) {
   const imageSize = Number(readiness?.image_size_bytes);
   if (!Number.isFinite(imageSize) || imageSize <= 0) return 0;
-  return imageSize * ($("shrink-image").checked ? 2 : 1) + Math.max(2 * 1024 ** 3, imageSize / 10);
+  return imageSize * (shrink ? 2 : 1) + Math.max(2 * 1024 ** 3, Math.floor(imageSize / 10));
 }
 
 function updateDestination() {
   const usbMode = isUsbDestination();
   const device = selectedUsbDevice();
+  const shrink = $("shrink-image").checked;
   $("usb-options").hidden = !usbMode;
   $("keep-full-row").hidden = !usbMode || !$("shrink-image").checked;
   $("format-confirm-row").hidden = !usbMode;
@@ -183,13 +180,19 @@ function updateDestination() {
     ? "Der ausgewählte USB-Stick wird neu als exFAT formatiert. Ohne Shrink-Haken bleibt das vollständige Karten-Image erhalten."
     : "Das vollständige Image wird direkt an den Browser übertragen. Es wird nicht geshrinkt.";
   const ready = Boolean(readiness?.backup_available);
-  const minimumUsbBytes = requiredUsbCapacity();
-  const targetTooSmall = Boolean(device && minimumUsbBytes && Number(device.size_bytes) < minimumUsbBytes);
+  const minimumUsbBytes = requiredUsbCapacity(shrink);
+  const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
   $("start-backup").disabled = !ready || Boolean(activeJobId) || (usbMode && (!device || targetTooSmall));
-  if (usbMode && device && readiness?.image_size_bytes) {
-    $("destination-description").textContent += ` Für diese Auswahl muss der Stick mindestens ${formatBytes(minimumUsbBytes)} groß sein.`;
-    if (targetTooSmall) $("destination-description").textContent += " Dieser Stick ist dafür zu klein; es wurde noch nichts formatiert.";
+  let capacityMessage = "";
+  if (targetTooSmall) {
+    const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString("de-DE", { maximumFractionDigits: 1 })} GiB`;
+    capacityMessage = `Zu wenig Platz: Der Stick hat ${gib(device.size_bytes)}. Diese Auswahl benötigt rund ${gib(minimumUsbBytes)}.`;
+    if (shrink) capacityMessage += " PiShrink braucht während der Verarbeitung Platz für zwei vollständige Kopien plus Reserve.";
+    capacityMessage += shrink && device.size_bytes >= requiredUsbCapacity(false)
+      ? " Entferne den Haken bei „Image … verkleinern“, um das vollständige Image auf diesem Stick zu sichern."
+      : " Wähle einen größeren Stick oder sichere das Image auf dem PC.";
   }
+  $("usb-capacity-message").textContent = capacityMessage;
 }
 
 function setCapability(id, label, enabled, detail, warning = false) {
@@ -265,6 +268,7 @@ $("preflight").addEventListener("click", async () => {
     renderPrinter(result.printer);
     renderStorage(result.storage);
     await loadUsbDevices();
+    updateDestination();
   } catch (error) { $("preflight-message").textContent = error.message; }
 });
 
