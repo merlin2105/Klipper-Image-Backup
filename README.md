@@ -29,7 +29,7 @@ Install on a supported Pi with `sudo ./install.sh`, then open the HTTPS address 
 
 The web service runs unprivileged. A root-owned PAM broker validates the existing Pi account password. A separate local media worker accepts only fixed image actions and revalidates USB identity before formatting; it does not expose arbitrary command execution. A reported active or paused print blocks capture. If Moonraker is unavailable, the user must explicitly confirm that no print is running or will start; live print monitoring is then unavailable. See [`docs/security.md`](docs/security.md).
 
-For remote KIBM maintenance, the installer grants the installing Pi account passwordless access only to the fixed `kibm-admin` wrapper (`status`, `logs`, `restart`, and `update`). The wrapper accepts no arbitrary commands.
+For remote KIBM maintenance, the installer grants the installing Pi account passwordless access only to the fixed `kibm-admin` wrapper (`status`, `logs`, USB diagnosis, `restart`, and `update`). The wrapper accepts no arbitrary commands.
 
 ## License
 
