@@ -15,5 +15,34 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 @media(max-width:680px){.backup-choice{grid-template-columns:1fr;gap:8px}.backup-choice>p{grid-column:auto}.usb-select-row{grid-template-columns:1fr auto}.usb-select-row>label{grid-column:1/-1}.usb-options{padding:12px}.nested-option{margin-left:16px}.usb-result{align-items:flex-start;flex-direction:column}.usb-result .download-link{width:100%;text-align:center}.destructive-confirm{margin-top:13px}}
 #dialog-submit-label{margin-left:0!important}
 .cap-warn{width:16px;height:16px;display:grid;place-items:center;flex:none;border-radius:50%;background:#342d20;color:var(--amber);font-style:normal}.cap-warn svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
-.usb-detection-status{margin:8px 0 0 159px;color:#9ba69d;font-size:12px;line-height:1.5}.usb-detection-status.detected{color:var(--acid)}.usb-detection-status.unavailable{color:var(--amber)}
-@media(max-width:680px){.usb-detection-status{margin-left:0}}
+.usb-detection-status {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  max-width: 520px;
+  margin: 12px 0 16px 159px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+.usb-detection-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--panel);
+}
+.usb-detection-icon svg { width: 24px; height: 24px; }
+.usb-detection-status strong { font-size: 14px; overflow-wrap: anywhere; }
+.usb-detection-status p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.usb-detection-status p:empty { display: none; }
+.usb-detection-status[data-state="detected"] { border-color: color-mix(in srgb, var(--line), var(--acid) 25%); }
+.usb-detection-status[data-state="detected"] .usb-detection-icon { color: var(--acid); border-color: color-mix(in srgb, var(--line), var(--acid) 25%); }
+.usb-detection-status[data-state="unavailable"] .usb-detection-icon { color: var(--amber); }
+@media (max-width: 680px) { .usb-detection-status { margin-left: 0; } }

@@ -132,19 +132,27 @@ async function loadUsbDevices() {
 function renderUsbDetection() {
   const status = $("usb-detection-status");
   const device = selectedUsbDevice();
+  let title = "Kein USB-Stick erkannt";
+  let detail = "Sobald du einen Stick am Pi einsteckst, erscheint er hier.";
+  let state = "";
   if (usbDeviceSignature === "unavailable") {
-    status.textContent = "USB-Erkennung ist derzeit nicht erreichbar.";
-    status.className = "usb-detection-status unavailable";
+    title = "USB-Erkennung nicht erreichbar";
+    detail = "Die Erkennung wird automatisch erneut versucht.";
+    state = "unavailable";
   } else if (device) {
-    status.textContent = `Erkannt: Ja · ${device.path} muss vor der Sicherung formatiert werden. Vorhandene Daten werden gelöscht.`;
-    status.className = "usb-detection-status detected";
+    title = `${device.model?.trim() || "USB-Stick"} ausgewählt`;
+    detail = `${device.path} · Vor der Sicherung ist eine Formatierung als exFAT nötig. Sie löscht die vorhandenen Daten.`;
+    state = "detected";
   } else if (usbDevices.length) {
-    status.textContent = `${usbDevices.length} USB-Stick${usbDevices.length === 1 ? "" : "s"} erkannt. Für USB-Sicherung auswählen; der Stick muss formatiert werden.`;
-    status.className = "usb-detection-status detected";
-  } else {
-    status.textContent = "Kein USB-Stick erkannt. Eingesteckte Sticks werden automatisch gesucht.";
-    status.className = "usb-detection-status";
+    title = usbDevices.length === 1 ? "USB-Stick erkannt" : `${usbDevices.length} USB-Sticks erkannt`;
+    detail = "Wähle USB als Speicherziel. KIBM formatiert den Stick erst nach deiner Bestätigung.";
+    state = "detected";
   }
+  status.dataset.state = state;
+  const heading = $("usb-detection-title");
+  const description = $("usb-detection-detail");
+  if (heading.textContent !== title) heading.textContent = title;
+  if (description.textContent !== detail) description.textContent = detail;
 }
 
 function selectedUsbDevice() {
