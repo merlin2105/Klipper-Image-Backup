@@ -2,7 +2,7 @@
 
 ## Current status
 
-A plan-only tool is available as `kibm-recovery plan`. It validates a supplied gzip-compressed CPIO `newc` initramfs, requires one executable regular `/init`, and creates a separate candidate bundle with:
+A plan-only tool is available as `kibm-recovery plan` and `kibm-recovery plan-image`. It validates a supplied gzip-compressed CPIO `newc` initramfs, requires one executable regular `/init`, and creates a separate candidate bundle with:
 
 - `candidate/tryboot.txt`
 - `candidate/kibm-recovery.cmdline`
@@ -10,6 +10,17 @@ A plan-only tool is available as `kibm-recovery plan`. It validates a supplied g
 - `manifest.json` with SHA-256 fingerprints for the normal boot files and generated candidates
 
 The command reads `config.txt` and `cmdline.txt`; it never writes to the supplied boot directory. It rejects an existing `autoboot.txt` or `tryboot.txt`, because those can change boot selection. The output directory must be new and outside the boot tree.
+
+For a raw disk image, `plan-image` reads the partition table and exactly one FAT boot partition using `sfdisk`, `blkid`, and mtools. It does not mount the image, use loop devices, or write to the image. The host needs those tools installed. Only the root `config.txt`, `cmdline.txt`, `autoboot.txt`, and `tryboot.txt` are inspected; boot files over 1 MiB are rejected.
+
+```sh
+kibm-recovery plan-image \
+  --image ./Klipper-test.img \
+  --initramfs ./build/kibm-recovery.cpio.gz \
+  --output-dir ./build/tryboot-plan
+```
+
+Use the test image or a copy. This command still only emits a plan; it does not boot or alter the image.
 
 Example, using a **copy** of a Pi boot partition and a separately built initramfs:
 

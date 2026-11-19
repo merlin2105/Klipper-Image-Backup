@@ -1,11 +1,14 @@
 import gzip
+import hashlib
 import json
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from kibm.recovery import create_tryboot_plan, validate_initramfs
+from kibm.recovery import create_image_tryboot_plan, create_tryboot_plan, validate_initramfs
 
 
 def _cpio_entry(name: str, content: bytes, mode: int, inode: int) -> bytes:
@@ -129,3 +132,32 @@ def test_plan_requires_regular_boot_files_and_valid_initramfs(tmp_path: Path) ->
     invalid.write_bytes(gzip.compress(b"not cpio"))
     with pytest.raises(ValueError, match="CPIO-newc"):
         create_tryboot_plan(boot, invalid, tmp_path / "invalid-plan")
+
+
+@pytest.mark.skipif(
+    any(shutil.which(tool) is None for tool in ("sfdisk", "blkid", "mkfs.fat", "mcopy", "mdir", "mtype")),
+    reason="Image integration requires util-linux and mtools",
+)
+def test_plan_image_reads_fat_image_without_modifying_it(tmp_path: Path) -> None:
+    image = tmp_path / "klipper.img"
+    with image.open("wb") as target:
+        target.truncate(64 * 1024 * 1024)
+    partition_table = b"label: dos\nunit: sectors\nsector-size: 512\n\nstart=2048, size=120000, type=c, bootable\n"
+    subprocess.run(["sfdisk", str(image)], input=partition_table, check=True, capture_output=True)
+    subprocess.run(["mkfs.fat", "-F", "32", "--offset=2048", str(image)], check=True, capture_output=True)
+    config = tmp_path / "config.txt"
+    cmdline = tmp_path / "cmdline.txt"
+    config.write_bytes(b"[all]\r\narm_64bit=1\r\n")
+    cmdline.write_bytes(b"root=PARTUUID=abcd-02 rootwait quiet\n")
+    image_spec = f"{image}@@1048576"
+    subprocess.run(["mcopy", "-i", image_spec, str(config), "::CONFIG.TXT"], check=True, capture_output=True)
+    subprocess.run(["mcopy", "-i", image_spec, str(cmdline), "::CMDLINE.TXT"], check=True, capture_output=True)
+    before = hashlib.sha256(image.read_bytes()).digest()
+
+    output = create_image_tryboot_plan(image, _initramfs(tmp_path), tmp_path / "image-plan")
+
+    assert hashlib.sha256(image.read_bytes()).digest() == before
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["mode"] == "plan-only"
+    assert manifest["boot_directory_modified"] is False
+    assert manifest["normal_boot_files"]["config.txt"] == hashlib.sha256(config.read_bytes()).hexdigest()
