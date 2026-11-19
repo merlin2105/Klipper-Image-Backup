@@ -5,6 +5,7 @@ if [[ ${EUID} -ne 0 ]]; then
   echo "Bitte mit sudo ausführen: sudo ./install.sh" >&2
   exit 1
 fi
+umask 022
 if [[ ! -r /etc/os-release ]] || ! . /etc/os-release; then
   echo "Betriebssystem konnte nicht über /etc/os-release erkannt werden." >&2
   exit 1
@@ -75,6 +76,7 @@ install -m 0644 pyproject.toml /opt/klipper-image-backup-manager/pyproject.toml
 python3 -m venv /opt/klipper-image-backup-manager/venv
 /opt/klipper-image-backup-manager/venv/bin/pip install --upgrade pip
 /opt/klipper-image-backup-manager/venv/bin/pip install /opt/klipper-image-backup-manager
+chmod -R a+rX /opt/klipper-image-backup-manager/venv
 install -m 0644 systemd/kibm.service /etc/systemd/system/kibm.service
 systemctl daemon-reload
 systemctl enable --now kibm.service
