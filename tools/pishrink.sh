@@ -175,6 +175,7 @@ Usage: $0 [-adhnrsvzZ] imagefile.img [newimagefile.img]
   -s         Don't expand filesystem when image is booted the first time
   -v         Be verbose
   -n         Disable automatic update checking
+  -o         Process the image without mounting its filesystem
   -r         Use advanced filesystem repair option if the normal one fails
   -z         Compress image after shrinking with gzip
   -Z         Compress image after shrinking with xz
@@ -186,6 +187,7 @@ EOM
 }
 
 should_skip_autoexpand=false
+offline_only=false
 debug=false
 update_check=true
 repair=false
@@ -193,12 +195,13 @@ parallel=false
 verbose=false
 ziptool=""
 
-while getopts ":adnhrsvzZ" opt; do
+while getopts ":adnhorsvzZ" opt; do
   case "${opt}" in
     a) parallel=true;;
     d) debug=true;;
     n) update_check=false;;
     h) help;;
+    o) offline_only=true; should_skip_autoexpand=true;;
     r) repair=true;;
     s) should_skip_autoexpand=true ;;
     v) verbose=true;;
@@ -369,12 +372,14 @@ else
   rc=$?
   if (( $rc )); then
     error $LINENO "resize2fs failed with rc $rc"
-    mount "$loopback" "$mountdir"
-    mv "$mountdir/etc/rc.local.bak" "$mountdir/etc/rc.local"
-    umount "$mountdir"
+    if [ "$should_skip_autoexpand" = false ]; then
+      mount "$loopback" "$mountdir"
+      mv "$mountdir/etc/rc.local.bak" "$mountdir/etc/rc.local"
+      umount "$mountdir"
+    fi
     losetup -d "$loopback"
     exit 12
-  else
+  elif [ "$offline_only" = false ]; then
     info "Zeroing any free space left"
     mount "$loopback" "$mountdir"
     cat /dev/zero > "$mountdir/PiShrink_zero_file" 2>/dev/null

@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=system-metrics">
-  <script src="/static/app.js?v=system-metrics" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=existing-usb-image">
+  <script src="/static/app.js?v=existing-usb-image" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -44,6 +44,10 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="8" width="10" height="13" rx="2"/><path d="M9 8V3h6v5M11 5.5h.01m2 0h.01M11 17h2"/></svg>
               <span><strong>USB-Stick · Sicherung</strong><small>Direkt am Raspberry Pi speichern</small></span>
             </button>
+            <button id="destination-existing" class="destination-card" type="button" aria-pressed="false" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8l3 3m0-3v3H8m8 5-3-3m0 3v-3h3"/></svg>
+              <span><strong>USB-Image verkleinern</strong><small>Vorhandene Datei mit PiShrink bearbeiten</small></span>
+            </button>
           </div>
           <p id="pc-options" class="pc-options" hidden>Der Browser speichert das vollständige Image im gewünschten Ordner. Plane Platz für die gesamte microSD ein.</p>
           <div id="usb-detection-status" class="usb-detection-status" role="status">
@@ -64,6 +68,10 @@
             <label id="keep-full-row" class="option-check nested-option" hidden><input id="keep-full-image" type="checkbox"><span><b>Vollständiges Image zusätzlich behalten</b><small>Wenn nicht aktiviert, wird das Voll-Image erst nach erfolgreichem Shrink gelöscht.</small></span></label>
             <label class="option-check"><input id="verify-image" type="checkbox" checked><span><b>Image nach Sicherung prüfen</b><small>KIBM liest das vollständige Image erneut und vergleicht seine SHA-256-Prüfsumme.</small></span></label>
             <p class="usb-format-note"><b>USB-Stick wird als exFAT formatiert.</b> Vorhandene Daten auf dem ausgewählten Stick werden gelöscht. exFAT ermöglicht die Nutzung unter Windows, macOS und Linux.</p>
+          </div>
+          <div id="existing-options" class="usb-options" hidden>
+            <div class="usb-select-row"><label for="existing-image">Image auf USB</label><select id="existing-image"><option value="">Image auswählen</option></select></div>
+            <p class="usb-format-note">PiShrink erstellt eine verkleinerte Kopie auf demselben Stick. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.</p>
           </div>
           <div id="backup-confirmations" class="backup-confirmations" hidden>
             <label class="confirm-row"><input id="backup-confirm" type="checkbox"><span>Ich bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status erfolgt keine automatische Druckprüfung.</span></label>

@@ -118,3 +118,6 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 @media (max-width: 560px) { .destination-choices { grid-template-columns: 1fr; } }
 .metrics-title { margin: 0 0 8px; color: var(--text); font-size: 13px; font-weight: 600; }
 .device-panel .usage-bar { margin: 5px 0 10px; }
+#destination-existing { grid-column: 1 / -1; }
+#existing-image { grid-column: 2 / -1; min-width: 0; }
+@media (max-width: 680px) { #existing-image { grid-column: 1 / -1; } }

@@ -11,6 +11,8 @@ let transferPoll = null;
 let usbDevices = [];
 let usbDeviceSignature = null;
 let usbScanInProgress = false;
+let usbImages = [];
+let imageScanInProgress = false;
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -164,9 +166,37 @@ async function loadUsbDevices() {
   renderUsbDetection();
   if (changed) {
     $("format-confirm").checked = false;
+    if (!usbDevices.length) renderExistingImages([]);
+    else loadExistingImages();
     updateDestination();
   }
   usbScanInProgress = false;
+}
+
+function renderExistingImages(images) {
+  const select = $("existing-image");
+  const selected = select.value;
+  usbImages = images;
+  select.replaceChildren(new Option("Image auswählen", ""));
+  for (const image of images) {
+    select.append(new Option(`${image.filename} · ${formatBytes(image.size_bytes)} · ${image.partition}`, image.id));
+  }
+  if (images.some(image => image.id === selected)) select.value = selected;
+  if (destination === "existing" && !images.length && !activeJobId) destination = null;
+  updateDestination();
+}
+
+async function loadExistingImages() {
+  if (imageScanInProgress || activeJobId || !usbDevices.length) return;
+  imageScanInProgress = true;
+  try {
+    const { images } = await api("/api/backup/usb/images", { signal: AbortSignal.timeout(12000) });
+    if (JSON.stringify(images) !== JSON.stringify(usbImages)) renderExistingImages(images);
+  } catch {
+    if (usbImages.length) renderExistingImages([]);
+  } finally {
+    imageScanInProgress = false;
+  }
 }
 
 function renderUsbDetection() {
@@ -209,23 +239,32 @@ function requiredUsbCapacity(shrink) {
 
 function updateDestination() {
   const usbMode = isUsbDestination();
+  const existingMode = destination === "existing";
   const device = selectedUsbDevice();
   const shrink = $("shrink-image").checked;
   const running = Boolean(activeJobId);
   $("destination-pc").disabled = running;
   $("destination-usb").disabled = running || usbDevices.length === 0;
+  $("destination-existing").disabled = running;
+  $("destination-existing").hidden = !usbImages.length;
+  $("destination-existing").setAttribute("aria-pressed", String(existingMode));
   $("destination-pc").setAttribute("aria-pressed", String(destination === "pc"));
   $("destination-usb").setAttribute("aria-pressed", String(usbMode));
   $("pc-options").hidden = destination !== "pc";
   $("usb-options").hidden = !usbMode;
+  $("existing-options").hidden = !existingMode;
   $("keep-full-row").hidden = !shrink;
   $("backup-confirmations").hidden = !destination;
   $("format-confirm-row").hidden = !usbMode || !device;
   $("start-backup").hidden = !destination;
-  const ready = Boolean(readiness?.backup_available);
+  $("start-backup").textContent = existingMode ? "Image verkleinern" : "Image erstellen";
+  const ready = existingMode
+    ? Boolean(readiness && readiness.printer?.classification !== "active")
+    : Boolean(readiness?.backup_available);
   const minimumUsbBytes = requiredUsbCapacity(shrink);
   const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
   $("start-backup").disabled = !destination || !ready || running || !$("backup-confirm").checked
+    || (existingMode && !$("existing-image").value)
     || (usbMode && (!device || targetTooSmall || !$("format-confirm").checked));
   let capacityMessage = "";
   if (targetTooSmall) {
@@ -316,7 +355,7 @@ $("preflight").addEventListener("click", async () => {
   } catch (error) { $("preflight-message").textContent = error.message; }
 });
 
-for (const target of ["pc", "usb"]) {
+for (const target of ["pc", "usb", "existing"]) {
   $(`destination-${target}`).addEventListener("click", () => {
     if (destination !== target) {
       destination = target;
@@ -329,6 +368,7 @@ for (const target of ["pc", "usb"]) {
 }
 $("backup-confirm").addEventListener("change", updateDestination);
 $("format-confirm").addEventListener("change", updateDestination);
+$("existing-image").addEventListener("change", updateDestination);
 $("usb-device").addEventListener("change", () => {
   $("format-confirm").checked = false;
   renderUsbDetection();
@@ -348,7 +388,11 @@ $("start-backup").addEventListener("click", async () => {
     $("backup-login-error").textContent = "";
     $("pi-password").required = !session.authenticated;
     $("pi-password").value = "";
-    if (isUsbDestination()) {
+    if (destination === "existing") {
+      $("dialog-submit-label").textContent = "Image verkleinern";
+      const image = usbImages.find(item => item.id === $("existing-image").value);
+      $("backup-dialog-detail").textContent = `${image.filename} · Verkleinerte Kopie auf ${image.partition}.`;
+    } else if (isUsbDestination()) {
       const target = selectedUsbDevice();
       $("backup-dialog-detail").textContent = target
         ? `${target.path} · ${target.model?.trim() || "Modell unbekannt"} · ${formatBytes(target.size_bytes)}. Der Stick wird formatiert; alle vorhandenen Daten darauf werden gelöscht.`
@@ -387,7 +431,15 @@ $("backup-form").addEventListener("submit", async (event) => {
       throw new Error("Prüfe Speicherziel und Bestätigungen erneut.");
     }
     let result;
-    if (isUsbDestination()) {
+    if (destination === "existing") {
+      result = await api("/api/backup/usb/shrink", {
+        method: "POST",
+        body: JSON.stringify({ image_id: $("existing-image").value, confirmed: $("backup-confirm").checked }),
+      });
+      activeJobType = "usb";
+      activeDownloadToken = result.download_token;
+      usbJobId = result.job_id;
+    } else if (isUsbDestination()) {
       const target = selectedUsbDevice();
       if (!target) throw new Error("Bitte zuerst einen erkannten USB-Stick auswählen.");
       result = await api("/api/backup/usb/start", {
@@ -540,7 +592,7 @@ async function pollUsbJob() {
       updateDestination();
       return;
     } else if (status.state === "fehler") {
-      $("backup-progress-title").textContent = "USB-Sicherung fehlgeschlagen";
+      $("backup-progress-title").textContent = destination === "existing" ? "Verkleinern fehlgeschlagen" : "USB-Sicherung fehlgeschlagen";
       $("backup-progress-value").textContent = "Fehler";
       $("backup-progress-bar").removeAttribute("value");
       if ((status.files || []).length) {
@@ -605,3 +657,6 @@ pollSystemMetrics();
 window.setInterval(() => {
   if (document.visibilityState === "visible") loadUsbDevices();
 }, 3000);
+window.setInterval(() => {
+  if (document.visibilityState === "visible") loadExistingImages();
+}, 10000);

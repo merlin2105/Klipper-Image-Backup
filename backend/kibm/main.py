@@ -43,6 +43,11 @@ class UsbBackupRequest(BaseModel):
     format_confirmed: bool
 
 
+class UsbShrinkRequest(BaseModel):
+    image_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmed: bool
+
+
 def _session(request: Request) -> tuple[str, str]:
     cookie = request.cookies.get("kibm_session", "")
     entry = sessions.get(cookie)
@@ -175,6 +180,14 @@ async def get_usb_devices():
         raise HTTPException(status_code=503, detail="USB-Erkennung ist derzeit nicht verfügbar.") from exc
 
 
+@app.get("/api/backup/usb/images")
+def get_usb_images():
+    try:
+        return _media_request({"action": "images"})
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="USB-Images können nicht gelesen werden.") from exc
+
+
 @app.get("/api/session")
 async def get_session(request: Request):
     try:
@@ -286,11 +299,27 @@ async def start_usb_backup(
     preflight = services.backup_preflight()
     if not preflight["backup_available"]:
         raise HTTPException(status_code=409, detail=" ".join(preflight["blockers"]))
+    return _start_media_job(session_id, {
+        "action": "start", "device_path": body.device_path, "shrink": body.shrink,
+        "keep_full": body.keep_full, "verify_image": body.verify_image, "confirmed": body.format_confirmed,
+    })
+
+
+@app.post("/api/backup/usb/shrink")
+def shrink_usb_image(
+    body: UsbShrinkRequest,
+    request: Request,
+    x_kibm_csrf: Optional[str] = Header(default=None),
+):
+    session_id, _ = _require_csrf(request, x_kibm_csrf)
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Bestätige zuerst den sicheren Druckerstatus.")
+    return _start_media_job(session_id, {"action": "shrink_existing", "image_id": body.image_id})
+
+
+def _start_media_job(session_id: str, payload: dict) -> dict:
     try:
-        result = _media_request({
-            "action": "start", "device_path": body.device_path, "shrink": body.shrink,
-            "keep_full": body.keep_full, "verify_image": body.verify_image, "confirmed": body.format_confirmed,
-        })
+        result = _media_request(payload)
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc) or "USB-Image konnte nicht gestartet werden.") from exc
     job = result["job"]

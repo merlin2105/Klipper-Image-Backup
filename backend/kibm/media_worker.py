@@ -23,6 +23,7 @@ from typing import Any, Callable, Optional
 
 SOCKET_PATH = Path("/run/kibm-media/worker.sock")
 VOLUME_PATH = Path("/run/kibm-media/volume")
+SCAN_PATH = Path("/run/kibm-media/scan")
 SOURCE_DEVICE = "/dev/mmcblk0"
 PISHRINK_PATH = Path("/opt/klipper-image-backup-manager/tools/pishrink.sh")
 BLOCKGETSIZE64 = 0x80081272
@@ -59,6 +60,7 @@ _lock = threading.RLock()
 _job: Optional[MediaJob] = None
 _worker_uid: Optional[int] = None
 _worker_gid: Optional[int] = None
+_listed_images: dict[str, dict[str, Any]] = {}
 
 
 def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -79,8 +81,9 @@ def _disk_size(path: str) -> int:
         os.close(fd)
 
 
-def _devices() -> list[dict[str, Any]]:
-    flat = _all_devices()
+def _devices(flat: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
+    if flat is None:
+        flat = _all_devices()
     root_device = next((item for item in flat if "/" in item["mountpoints"]), None)
     while root_device and root_device["type"] != "disk":
         root_device = next((item for item in flat if item["path"] == root_device["parent"]), None)
@@ -98,7 +101,7 @@ def _devices() -> list[dict[str, Any]]:
 def _all_devices() -> list[dict[str, Any]]:
     result = _run([
         "lsblk", "--json", "--bytes", "--output",
-        "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,RM,RO,TRAN,MAJ:MIN",
+        "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,RM,RO,TRAN,MAJ:MIN,UUID",
     ])
     flat: list[dict[str, Any]] = []
 
@@ -118,6 +121,7 @@ def _all_devices() -> list[dict[str, Any]]:
                 "read_only": bool(item.get("ro", False)),
                 "transport": item.get("tran"),
                 "major_minor": item.get("maj:min"),
+                "uuid": item.get("uuid"),
             })
             visit(item.get("children") or [], path)
 
@@ -133,6 +137,80 @@ def _selected_device(path: str) -> dict[str, Any]:
     if not stat.S_ISBLK(info.st_mode):
         raise ValueError("Das ausgewählte Ziel ist kein Blockgerät.")
     return device
+
+
+def _image_volumes() -> list[dict[str, Any]]:
+    flat = _all_devices()
+    disks = {disk["path"]: disk for disk in _devices(flat)}
+    volumes = []
+    for item in flat:
+        disk = disks.get(item["parent"] or item["path"])
+        if not disk or item["type"] not in {"disk", "part"} or item["filesystem"] != "exfat" or item["read_only"]:
+            continue
+        if set(item["mountpoints"]) - {str(VOLUME_PATH)}:
+            continue
+        try:
+            sequence = (Path("/sys/class/block") / disk["name"] / "diskseq").read_text().strip()
+        except OSError:
+            sequence = None
+        try:
+            inode = os.stat(item["path"], follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISBLK(inode.st_mode):
+            volumes.append({
+                **item, "device": disk, "rdev": inode.st_rdev,
+                "identity": (item["path"], item["uuid"], item["size_bytes"], sequence),
+            })
+    return volumes
+
+
+def _image_id(volume: dict[str, Any], path: Path, info: os.stat_result) -> str:
+    identity = (volume["identity"], path.name, info.st_size, info.st_mtime_ns)
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+
+def _mounted_volume(path: Path, volume: dict[str, Any]) -> bool:
+    return path.is_mount() and path.stat().st_dev == volume["rdev"]
+
+
+def _mount_image_volume(volume: dict[str, Any], target: Path, mode: str) -> None:
+    target.mkdir(mode=0o750, exist_ok=True)
+    if target.is_mount():
+        raise ValueError("Der USB-Einhängepunkt ist bereits belegt.")
+    _run(["mount", "-t", "exfat", "-o", f"{mode},nosuid,nodev,noexec", volume["path"], str(target)], timeout=4)
+    if not _mounted_volume(target, volume):
+        _run(["umount", "--", str(target)])
+        raise ValueError("Der USB-Stick wurde gewechselt.")
+
+
+def _existing_images() -> list[dict[str, Any]]:
+    images = []
+    for volume in _image_volumes():
+        try:
+            already_mounted = _mounted_volume(VOLUME_PATH, volume)
+            directory = VOLUME_PATH if already_mounted else SCAN_PATH
+            if not already_mounted:
+                _mount_image_volume(volume, directory, "ro")
+            try:
+                for path in directory.iterdir():
+                    if path.suffix.lower() != ".img" or path.name.startswith("."):
+                        continue
+                    info = path.lstat()
+                    if stat.S_ISREG(info.st_mode) and info.st_size > 0:
+                        images.append({
+                            "id": _image_id(volume, path, info), "filename": path.name,
+                            "size_bytes": info.st_size, "device": volume["device"]["path"],
+                            "partition": volume["path"], "volume": volume,
+                        })
+                    if len(images) >= 100:
+                        return images
+            finally:
+                if not already_mounted:
+                    _run(["umount", "--", str(directory)], timeout=4)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return images
 
 
 def _printer_active() -> bool:
@@ -229,6 +307,61 @@ def _copy_for_shrink(source: Path, target: Path) -> None:
             _set_job(shrink_bytes=copied)
 
 
+def _shrink_image(job: MediaJob, full_path: Path, final_path: Path) -> dict[str, Any]:
+    working_path = VOLUME_PATH / f".{job.job_id}.img.part"
+    _set_job(
+        state="schrumpfen", phase="kopie", shrink_total_bytes=job.image_size,
+        message="Arbeitskopie für PiShrink wird erstellt.",
+    )
+    try:
+        _copy_for_shrink(full_path, working_path)
+        _set_job(phase="verkleinern", message="PiShrink prüft und verkleinert Dateisystem und Partition.")
+        _run([str(PISHRINK_PATH), "-nso", str(working_path)], timeout=60 * 60 * 4)
+        final_size = working_path.stat().st_size
+        if not 0 < final_size < job.image_size:
+            raise OSError("PiShrink hat kein kleineres, gültiges Image erzeugt.")
+        _set_job(
+            phase="pruefsumme", shrink_bytes=0, shrink_total_bytes=final_size,
+            message="Prüfsumme des verkleinerten Images wird berechnet.",
+        )
+        final_hash = _hash_file(working_path, lambda count: _set_job(shrink_bytes=count))
+        with working_path.open("rb") as image:
+            os.fsync(image.fileno())
+        working_path.rename(final_path)
+    finally:
+        working_path.unlink(missing_ok=True)
+    return {"filename": final_path.name, "size_bytes": final_size, "sha256": final_hash, "kind": "geshrinkt"}
+
+
+def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
+    try:
+        if _printer_active():
+            raise ValueError("Moonraker meldet einen aktiven Druckauftrag.")
+        expected = image["volume"]["identity"]
+        volume = next((item for item in _image_volumes() if item["identity"] == expected), None)
+        if volume is None:
+            raise ValueError("Der USB-Stick wurde gewechselt oder ist nicht mehr verfügbar.")
+        if not _mounted_volume(VOLUME_PATH, volume):
+            if VOLUME_PATH.is_mount():
+                _run(["umount", "--", str(VOLUME_PATH)])
+            _mount_image_volume(volume, VOLUME_PATH, "rw")
+        if not any(item["identity"] == expected for item in _image_volumes()):
+            raise ValueError("Der USB-Stick wurde beim Einbinden gewechselt.")
+        source = VOLUME_PATH / image["filename"]
+        info = source.lstat()
+        if not stat.S_ISREG(info.st_mode) or _image_id(volume, source, info) != image["id"]:
+            raise ValueError("Die Image-Datei wurde seit der Auswahl verändert. Wähle sie erneut aus.")
+        filesystem = os.statvfs(VOLUME_PATH)
+        if filesystem.f_bavail * filesystem.f_frsize < job.image_size:
+            raise ValueError("Auf dem Stick fehlt freier Speicherplatz für eine vollständige Arbeitskopie.")
+        base = re.sub(r"[^A-Za-z0-9._-]+", "-", source.stem).strip(".-")[:100] or "usb-image"
+        final_path = VOLUME_PATH / f"{base}-{job.job_id}-geshrinkt.img"
+        result = _shrink_image(job, source, final_path)
+        _set_job(state="bereit", phase="fertig", message="Verkleinerte Kopie ist auf USB gespeichert.", files=[result])
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        _set_job(state="fehler", phase="fehler", message="USB-Image konnte nicht verkleinert werden.", error=str(exc))
+
+
 def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
     full_path: Optional[Path] = None
     full_image_ready = False
@@ -291,29 +424,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
 
         if job.shrink:
             final_path = VOLUME_PATH / f"{base}-geshrinkt.img"
-            working_path = VOLUME_PATH / f".{job.job_id}.img.part"
-            _set_job(
-                state="schrumpfen", phase="kopie", shrink_total_bytes=job.image_size,
-                message="Arbeitskopie für PiShrink wird erstellt.",
-            )
-            try:
-                _copy_for_shrink(full_path, working_path)
-                _set_job(phase="verkleinern", message="PiShrink prüft und verkleinert Dateisystem und Partition.")
-                _run([str(PISHRINK_PATH), "-ns", str(working_path)], timeout=60 * 60 * 4)
-                final_size = working_path.stat().st_size
-                if not 0 < final_size < job.image_size:
-                    raise OSError("PiShrink hat kein kleineres, gültiges Image erzeugt.")
-                _set_job(
-                    phase="pruefsumme", shrink_bytes=0, shrink_total_bytes=final_size,
-                    message="Prüfsumme des verkleinerten Images wird berechnet.",
-                )
-                final_hash = _hash_file(working_path, lambda count: _set_job(shrink_bytes=count))
-                with working_path.open("rb") as image:
-                    os.fsync(image.fileno())
-                working_path.rename(final_path)
-            finally:
-                working_path.unlink(missing_ok=True)
-            files = [{"filename": final_path.name, "size_bytes": final_path.stat().st_size, "sha256": final_hash, "kind": "geshrinkt"}]
+            files = [_shrink_image(job, full_path, final_path)]
             if job.keep_full:
                 files.insert(0, {"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": digest.hexdigest(), "kind": "vollständig"})
             else:
@@ -364,8 +475,12 @@ class MediaHandler(socketserver.StreamRequestHandler):
             action = request.get("action")
             if action == "devices":
                 self._reply({"devices": _devices()})
+            elif action == "images":
+                self._list_images()
             elif action == "start":
                 self._start(request)
+            elif action == "shrink_existing":
+                self._start_existing(request)
             elif action == "status":
                 self._status(request)
             elif action == "download":
@@ -374,8 +489,38 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._eject(request)
             else:
                 self._reply({"error": "unsupported_action"})
-        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
             self._reply({"error": str(exc) or "media_operation_failed"})
+
+    def _list_images(self) -> None:
+        with _lock:
+            if _job and _job.state in BUSY_STATES:
+                self._reply({"images": []})
+                return
+            images = _existing_images()
+            _listed_images.clear()
+            _listed_images.update((item["id"], item) for item in images)
+            self._reply({"images": [
+                {key: value for key, value in item.items() if key != "volume"} for item in images
+            ]})
+
+    def _start_existing(self, request: dict[str, Any]) -> None:
+        global _job
+        with _lock:
+            if _job and (_job.state in BUSY_STATES or _job.active_downloads):
+                raise ValueError("Auf dem USB-Stick läuft bereits ein Auftrag oder Download.")
+            image = _listed_images.get(request.get("image_id"))
+            if not image:
+                raise ValueError("Die Image-Datei ist nicht mehr verfügbar. Wähle sie erneut aus.")
+            volume = image["volume"]
+            job = MediaJob(
+                job_id=secrets.token_hex(10), state="wird vorbereitet", phase="vorbereitung",
+                message="Image auf USB wird geöffnet.", image_size=image["size_bytes"],
+                source_device=volume["path"], shrink=True, keep_full=True, verify_image=False,
+            )
+            _job = job
+        threading.Thread(target=_run_existing_shrink, args=(job, image), daemon=True).start()
+        self._reply({"job": _job_data(job), "device": volume["device"]})
 
     def _start(self, request: dict[str, Any]) -> None:
         global _job
@@ -448,9 +593,9 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 raise ValueError("Der USB-Stick kann während eines laufenden Auftrags nicht ausgeworfen werden.")
             if _job and _job.active_downloads:
                 raise ValueError("Warte, bis der Browser-Download abgeschlossen ist, bevor du den Stick auswirfst.")
-        if os.path.ismount(str(VOLUME_PATH)):
-            _run(["sync"])
-            _run(["umount", "--", str(VOLUME_PATH)])
+            if os.path.ismount(str(VOLUME_PATH)):
+                _run(["sync"])
+                _run(["umount", "--", str(VOLUME_PATH)])
         self._reply({"ejected": True})
 
     def _reply(self, result: dict[str, Any]) -> None:
