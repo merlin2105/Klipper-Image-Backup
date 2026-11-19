@@ -139,7 +139,7 @@ def klipper_status() -> dict[str, Any]:
             "classification": classification,
             "safe_to_backup": safe,
             "message": "Druckauftrag aktiv oder pausiert." if classification == "active" else (
-                "Drucker bereit." if safe else "Druckerstatus ist unbekannt; Backup gesperrt."
+                "Drucker bereit." if safe else "Druckerstatus ist unbekannt; manuelle Bestätigung erforderlich."
             ),
         }
     except (OSError, urllib.error.URLError, TimeoutError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
@@ -149,7 +149,7 @@ def klipper_status() -> dict[str, Any]:
             "klippy_state": None,
             "classification": "unknown",
             "safe_to_backup": False,
-            "message": "Moonraker nicht erreichbar oder Status ungültig; Backup gesperrt.",
+            "message": "Moonraker nicht erreichbar oder Status ungültig; manuelle Bestätigung erforderlich.",
         }
 
 
@@ -157,8 +157,8 @@ def backup_preflight() -> dict[str, Any]:
     printer = klipper_status()
     storage = storage_info()
     blockers = []
-    if not printer["safe_to_backup"]:
-        blockers.append("Der Drucker muss verbunden und im Standby sein.")
+    if printer["classification"] == "active":
+        blockers.append("Ein Druckauftrag läuft oder ist pausiert. Das Backup ist gesperrt.")
     device = storage.get("system_device")
     supported_layout = False
     source_readable = False
@@ -197,7 +197,7 @@ def backup_preflight() -> dict[str, Any]:
         "capture_mode": "full_raw_live_image",
         "image_size_bytes": device.get("size_bytes") if device else None,
         "checks": {
-            "printer_ready": printer["safe_to_backup"],
+            "printer_ready": printer["classification"] != "active",
             "system_card_supported": bool(device and device.get("path") == "/dev/mmcblk0" and supported_layout),
             "read_access": source_readable,
         },

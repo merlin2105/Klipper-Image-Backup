@@ -54,7 +54,7 @@ Never shrink the mounted live root. Never run destructive tools against a source
 
 ### Integration and API
 
-The dashboard exposes diagnosis endpoints. Backup preflight checks printer standby, the supported system card, and read permissions. Mutations require a browser session validated against the existing Pi account and CSRF protection. PC mode streams the full raw image from `/dev/mmcblk0` to the browser over local HTTPS. USB mode routes fixed device and image requests through the media worker, which checks the printer state during capture. The card is read while the system is running, so live files may change during capture. Moonraker state is queried through its local HTTP API. Mainsail/Fluidd source files are not edited. Recovery and restore remain future work.
+The dashboard exposes diagnosis endpoints. Backup preflight blocks a reported active or paused print and checks the supported system card and read permissions. If Moonraker is unavailable, the user must explicitly confirm that no print is running or will start; live monitoring is unavailable. Mutations require a browser session validated against the existing Pi account and CSRF protection. PC mode streams the full raw image from `/dev/mmcblk0` to the browser over local HTTPS. USB mode routes fixed device and image requests through the media worker, which blocks a reported active print during capture. The card is read while the system is running, so live files may change during capture. Moonraker state is queried through its local HTTP API. Mainsail/Fluidd source files are not edited. Recovery and restore remain future work.
 
 ### Verification plan
 

@@ -128,19 +128,15 @@ def _selected_device(path: str) -> dict[str, Any]:
     return device
 
 
-def _printer_safe() -> bool:
+def _printer_active() -> bool:
     try:
-        with urllib.request.urlopen("http://127.0.0.1:7125/printer/info", timeout=2) as response:
-            info = json.loads(response.read(1024 * 1024)).get("result", {})
         with urllib.request.urlopen(
             "http://127.0.0.1:7125/printer/objects/query?print_stats", timeout=2
         ) as response:
             stats = json.loads(response.read(1024 * 1024)).get("result", {}).get("status", {}).get("print_stats")
-        return bool(
-            isinstance(stats, dict)
-            and stats.get("state", "").lower() in {"standby", "complete", "cancelled", "idle"}
-            and (info.get("klippy_state") or info.get("state")) == "ready"
-        )
+        # Backup requires an explicit confirmation. Without Moonraker there is
+        # no live status; a reported active or paused print still blocks it.
+        return bool(isinstance(stats, dict) and stats.get("state", "").lower() in {"printing", "paused"})
     except (OSError, urllib.error.URLError, TimeoutError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
         return False
 
@@ -202,8 +198,8 @@ def _set_job(**values: Any) -> None:
 def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
     full_path: Optional[Path] = None
     try:
-        if not _printer_safe():
-            raise ValueError("Der Drucker ist nicht sicher im Standby. Es wurde noch nichts formatiert.")
+        if _printer_active():
+            raise ValueError("Moonraker meldet einen aktiven Druck. Es wurde noch nichts formatiert.")
         current_device = _selected_device(device["path"])
         if current_device["major_minor"] != device["major_minor"] or current_device["size_bytes"] != device["size_bytes"]:
             raise ValueError("Der USB-Stick wurde seit der Auswahl gewechselt. Es wurde nichts formatiert.")
@@ -225,8 +221,8 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         available_bytes = shutil.disk_usage(VOLUME_PATH).free
         if available_bytes < required_bytes:
             raise ValueError("Nach dem Formatieren steht nicht genug freier Platz für den sicheren Image-Ablauf zur Verfügung.")
-        if not _printer_safe():
-            raise ValueError("Der Druckerstatus ist nicht sicher. Die Sicherung wurde nicht gestartet.")
+        if _printer_active():
+            raise ValueError("Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.")
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         safe_hostname = re.sub(r"[^A-Za-z0-9._-]+", "-", hostname).strip(".-") or "klipper"
@@ -243,8 +239,8 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
                 copied = 0
                 while copied < job.image_size:
                     if time.monotonic() >= next_printer_check:
-                        if not _printer_safe():
-                            raise OSError("Druckerstatus ist nicht mehr sicher. Image-Datei ist unvollständig.")
+                        if _printer_active():
+                            raise OSError("Moonraker meldet einen aktiven Druck. Image-Datei ist unvollständig.")
                         next_printer_check = time.monotonic() + PRINTER_RECHECK_SECONDS
                     chunk = os.read(source_fd, min(CHUNK_BYTES, job.image_size - copied))
                     if not chunk:

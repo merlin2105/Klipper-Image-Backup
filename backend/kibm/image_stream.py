@@ -145,8 +145,8 @@ def stream_job(job: ImageJob) -> Iterator[bytes]:
             job.state = "streaming"
         while sent < job.size_bytes:
             if time.monotonic() >= next_printer_check:
-                if not services.klipper_status()["safe_to_backup"]:
-                    raise OSError("Druckerstatus ist nicht mehr sicher; Image-Übertragung abgebrochen.")
+                if services.klipper_status()["classification"] == "active":
+                    raise OSError("Moonraker meldet einen aktiven Druck; Image-Übertragung abgebrochen.")
                 next_printer_check = time.monotonic() + PRINTER_RECHECK_SECONDS
             target = min(CHUNK_BYTES, job.size_bytes - sent)
             chunk = bytearray()

@@ -48,7 +48,9 @@ async function loadDashboard() {
     readiness = currentReadiness;
     $("overall-title").textContent = "Diagnose aktiv · Systemkarte geschützt";
     $("overall-description").textContent = currentReadiness.backup_available
-      ? "Drucker im Standby · vollständige System-microSD erkannt."
+      ? (printer.classification === "unknown"
+        ? "Kein Druckerstatus verfügbar · Backup nach Bestätigung möglich · vollständige System-microSD erkannt."
+        : "Drucker im Standby · vollständige System-microSD erkannt.")
       : currentReadiness.blockers.join(" ");
     $("overall-led").className = currentReadiness.backup_available ? "status-led" : "status-led warning";
     renderPrinter(printer);
@@ -64,7 +66,10 @@ async function loadDashboard() {
 
 function renderReadiness(result) {
   const checks = result.checks || {};
-  setCapability("printer-capability", "Druckerstatus", checks.printer_ready, checks.printer_ready ? "Standby" : "gesperrt");
+  const printer = result.printer || {};
+  const printerActive = printer.classification === "active";
+  const printerUnknown = printer.classification === "unknown";
+  setCapability("printer-capability", "Druckerstatus", !printerActive, printerActive ? "Druck aktiv · gesperrt" : printerUnknown ? "nicht verfügbar · Bestätigung nötig" : "Standby", printerUnknown);
   setCapability("storage-capability", "System-microSD", checks.system_card_supported, checks.system_card_supported ? "unterstützt" : "nicht unterstützt");
   setCapability("read-capability", "Leserechte", checks.read_access, checks.read_access ? "bereit" : "fehlen");
   const size = result.image_size_bytes;
@@ -73,7 +78,9 @@ function renderReadiness(result) {
   $("image-estimate-badge").classList.toggle("estimate-ready", result.backup_available);
   $("start-backup").disabled = !result.backup_available || Boolean(activeJobId);
   $("preflight-message").textContent = result.backup_available
-    ? (isUsbDestination() ? "USB sichert standardmäßig die vollständige Karte. Shrinking ist optional." : "PC-Sicherung überträgt die gesamte Karte und bleibt ungeshrinkt.")
+    ? (printerUnknown
+      ? "Kein Druckerstatus verfügbar. Starte nur, wenn sicher kein Druck läuft; die Bestätigung ist erforderlich."
+      : (isUsbDestination() ? "USB sichert standardmäßig die vollständige Karte. Shrinking ist optional." : "PC-Sicherung überträgt die gesamte Karte und bleibt ungeshrinkt."))
     : result.blockers.join(" ");
 }
 
@@ -146,15 +153,15 @@ function updateDestination() {
   }
 }
 
-function setCapability(id, label, enabled, detail) {
+function setCapability(id, label, enabled, detail, warning = false) {
   const row = $(id);
   const icon = row.querySelector("i");
-  icon.className = enabled ? "cap-yes" : "cap-no";
+  icon.className = warning ? "cap-warn" : enabled ? "cap-yes" : "cap-no";
   icon.replaceChildren();
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", enabled ? "m3 8 3 3 7-7" : "m4 4 8 8m0-8-8 8");
+  path.setAttribute("d", warning ? "M8 3v6m0 3h.01" : enabled ? "m3 8 3 3 7-7" : "m4 4 8 8m0-8-8 8");
   svg.append(path);
   icon.append(svg);
   row.querySelector(".capability-label").textContent = label;
@@ -169,7 +176,7 @@ function renderPrinter(printer) {
   $("printer-title").textContent = isReady ? "Bereit" : isActive ? "Druckauftrag aktiv" : "Status unbekannt";
   $("printer-description").textContent = printer.message;
   $("printer-state").textContent = (printer.state || "UNBEKANNT").toUpperCase();
-  $("restart-safety").textContent = `BACKUP: ${printer.safe_to_backup ? "BEREIT" : "GESPERRT"}`;
+  $("restart-safety").textContent = `BACKUP: ${isActive ? "GESPERRT" : printer.classification === "unknown" ? "BESTÄTIGUNG NÖTIG" : "BEREIT"}`;
 }
 
 function renderStorage(storage) {
@@ -249,7 +256,7 @@ $("start-backup").addEventListener("click", async () => {
         : "Bitte zuerst einen USB-Stick auswählen.";
     } else {
       $("backup-dialog-detail").textContent = session.authenticated
-        ? "Bestätige den Standby des Druckers. Für die PC-Sicherung wird die vollständige Karte übertragen."
+        ? "Bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status ist keine automatische Druckprüfung möglich. Für die PC-Sicherung wird die vollständige Karte übertragen."
         : "Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.";
     }
     $("backup-login").showModal();

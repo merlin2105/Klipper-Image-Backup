@@ -48,7 +48,7 @@
         <section id="backup" class="backup-panel panel">
           <div class="backup-intro"><div><h3>Image der System-microSD</h3><p id="backup-intro-copy">Wähle, ob KIBM das vollständige Karten-Image direkt an den PC streamt oder auf einem USB-Stick sichert.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
           <div class="capability-row"><span id="printer-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">Druckerstatus</span><b>wird geprüft</b></span><span id="storage-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">System-microSD</span><b>wird geprüft</b></span><span id="read-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">Leserechte</span><b>wird geprüft</b></span></div>
-          <div class="backup-warning"><b>Live-Abbild:</b> Der Pi bleibt eingeschaltet. KIBM prüft während der Übertragung, dass kein Druck startet. Andere Systemdaten können sich währenddessen ändern.</div>
+          <div class="backup-warning"><b>Live-Abbild:</b> Der Pi bleibt eingeschaltet. Wenn Moonraker erreichbar ist, bricht KIBM bei einem laufenden Druck ab. Ohne Moonraker-Verbindung ist keine Live-Prüfung möglich; bestätige dann nur, wenn sicher kein Druck läuft oder startet. Andere Systemdaten können sich währenddessen ändern.</div>
           <div class="backup-choice">
             <label for="backup-destination">Speicherziel</label>
             <select id="backup-destination" name="backup-destination"><option value="pc">PC · vollständiges Image</option><option value="usb" disabled>USB-Stick wird gesucht …</option></select>
@@ -70,7 +70,7 @@
             <h2 id="backup-dialog-title">Mit deinem Pi-Konto anmelden</h2>
             <p id="backup-dialog-detail">Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.</p>
             <div id="pi-auth-fields"><label for="pi-password">Bestehendes Pi-Passwort</label><input id="pi-password" name="password" type="password" autocomplete="current-password" required></div>
-            <label class="confirm-row"><input id="backup-confirm" type="checkbox" required><span>Ich bestätige, dass der Drucker im Standby ist und während der Übertragung nicht gestartet wird.</span></label>
+            <label class="confirm-row"><input id="backup-confirm" type="checkbox" required><span>Ich bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status erfolgt keine automatische Druckprüfung.</span></label>
             <label id="format-confirm-row" class="confirm-row destructive-confirm" hidden><input id="format-confirm" type="checkbox"><span>Ich habe den ausgewählten USB-Stick geprüft. KIBM darf ihn vollständig löschen und als exFAT formatieren.</span></label>
             <p id="backup-login-error" class="error-text" role="alert"></p>
             <div class="dialog-actions"><button id="backup-cancel" class="secondary-button" type="button">Abbrechen</button><button class="primary-button" type="submit"><span id="dialog-submit-label">Image herunterladen</span> <span aria-hidden="true">↓</span></button></div>

@@ -1,6 +1,6 @@
 # API
 
-System diagnosis is available without login on the trusted local network. Image creation and download require HTTPS, the existing Pi account password, a confirmed idle printer, and a CSRF-protected session.
+System diagnosis is available without login on the trusted local network. Image creation and download require HTTPS, the existing Pi account password, explicit confirmation that no print is running or will start, and a CSRF-protected session. A printer-reported active or paused job blocks imaging; when Moonraker is unavailable, the confirmation is the user's safety check.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -8,7 +8,7 @@ System diagnosis is available without login on the trusted local network. Image 
 | `GET` | `/api/storage` | `lsblk` devices and root filesystem usage |
 | `GET` | `/api/klipper/status` | Moonraker print state and Klippy readiness |
 | `GET` | `/api/recovery/status` | Explicit unavailable status for recovery support |
-| `GET` | `/api/backup/preflight` | Read-only checks for printer standby, supported card layout, and read access |
+| `GET` | `/api/backup/preflight` | Read-only checks for active print state, supported card layout, and read access |
 | `GET` | `/api/session` | Reports whether the browser session is authenticated |
 | `POST` | `/api/login` | Validates the existing Pi account password through the local auth broker |
 | `POST` | `/api/logout` | Ends the authenticated session (CSRF-protected) |

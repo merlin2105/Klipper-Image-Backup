@@ -27,7 +27,7 @@ Install on a supported Pi with `sudo ./install.sh`, then open the HTTPS address 
 
 ## Safety
 
-The web service runs unprivileged. A root-owned PAM broker validates the existing Pi account password. A separate local media worker accepts only fixed image actions and revalidates USB identity before formatting; it does not expose arbitrary command execution. Moonraker being unavailable or returning an unknown printer state blocks capture. See [`docs/security.md`](docs/security.md).
+The web service runs unprivileged. A root-owned PAM broker validates the existing Pi account password. A separate local media worker accepts only fixed image actions and revalidates USB identity before formatting; it does not expose arbitrary command execution. A reported active or paused print blocks capture. If Moonraker is unavailable, the user must explicitly confirm that no print is running or will start; live print monitoring is then unavailable. See [`docs/security.md`](docs/security.md).
 
 ## License
 
