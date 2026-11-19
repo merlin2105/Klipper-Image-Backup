@@ -44,13 +44,18 @@ if systemctl list-units --type=service --all --no-legend 'klipper*.service' 2>/d
 if [[ -d /var/www/mainsail || -d /usr/share/nginx/html/mainsail ]]; then echo "Mainsail: erkannt"; else echo "Mainsail: nicht erkannt"; fi
 if [[ -d /var/www/fluidd || -d /usr/share/nginx/html/fluidd ]]; then echo "Fluidd: erkannt"; else echo "Fluidd: nicht erkannt"; fi
 
-echo "KIBM erstellt vollständige, unkomprimierte Images der System-microSD. Bootdateien, Partitionen und EEPROM werden nicht verändert."
+echo "PC-Ziel: vollständiges, unkomprimiertes Image direkt im Browser speichern. USB-Ziel: Stick wird nach ausdrücklicher Auswahl als exFAT formatiert; Shrinking ist optional."
+echo "Die laufende System-microSD wird nicht verändert. USB-Formatierung löscht alle Daten auf dem ausgewählten Stick."
 echo "Der Dienst nutzt HTTPS im lokalen Netzwerk. Beim ersten Browseraufruf muss das lokale Zertifikat bestätigt werden. Keine Portweiterleitung ins Internet einrichten."
 read -r -p "Installation fortsetzen? [j/N] " answer
 [[ ${answer,,} == j || ${answer,,} == ja ]] || { echo "Abgebrochen."; exit 0; }
+if mountpoint -q /run/kibm-media/volume 2>/dev/null; then
+  echo "Ein USB-Image ist noch eingebunden. Bitte den Stick zuerst in KIBM sicher auswerfen; die Installation wurde nicht verändert." >&2
+  exit 1
+fi
 
 missing_packages=()
-for package in python3 python3-venv python3-pip python3-pam openssl; do
+for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux; do
   if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -q 'install ok installed'; then
     missing_packages+=("${package}")
   fi
@@ -58,6 +63,10 @@ done
 if (( ${#missing_packages[@]} )); then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
+fi
+if ! modprobe loop; then
+  echo "Das Kernel-Loop-Gerät für PiShrink konnte nicht geladen werden." >&2
+  exit 1
 fi
 python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
@@ -121,10 +130,17 @@ chmod 0644 /etc/kibm/tls.crt
 
 systemctl stop kibm.service 2>/dev/null || true
 systemctl stop kibm-auth.service 2>/dev/null || true
+systemctl stop kibm-media.service 2>/dev/null || true
+install -d -m 0755 /etc/modules-load.d
+printf 'loop\n' > /etc/modules-load.d/kibm-loop.conf
 install -d -m 0755 /opt/klipper-image-backup-manager/backend
 cp -a backend/kibm /opt/klipper-image-backup-manager/backend/
+install -d -m 0755 /opt/klipper-image-backup-manager/tools
+install -m 0755 tools/pishrink.sh /opt/klipper-image-backup-manager/tools/pishrink.sh
+install -m 0644 tools/PISHRINK-LICENSE /opt/klipper-image-backup-manager/tools/PISHRINK-LICENSE
 install -m 0644 pyproject.toml /opt/klipper-image-backup-manager/pyproject.toml
 install -m 0644 systemd/kibm-auth.service /etc/systemd/system/kibm-auth.service
+install -m 0644 systemd/kibm-media.service /etc/systemd/system/kibm-media.service
 python3 -m venv /opt/klipper-image-backup-manager/venv
 /opt/klipper-image-backup-manager/venv/bin/pip install --upgrade pip
 /opt/klipper-image-backup-manager/venv/bin/pip install /opt/klipper-image-backup-manager
@@ -136,6 +152,13 @@ if ! systemctl is-active --quiet kibm-auth.service || [[ ! -S /run/kibm-auth/aut
   echo "Der Pi-Passwortdienst konnte seinen lokalen Socket nicht starten." >&2
   systemctl status kibm-auth.service --no-pager -l >&2 || true
   journalctl -u kibm-auth.service -n 30 --no-pager >&2 || true
+  exit 1
+fi
+systemctl enable --now kibm-media.service
+if ! systemctl is-active --quiet kibm-media.service || [[ ! -S /run/kibm-media/worker.sock ]]; then
+  echo "Der USB-Image-Dienst konnte seinen lokalen Socket nicht starten." >&2
+  systemctl status kibm-media.service --no-pager -l >&2 || true
+  journalctl -u kibm-media.service -n 30 --no-pager >&2 || true
   exit 1
 fi
 systemctl enable --now kibm.service

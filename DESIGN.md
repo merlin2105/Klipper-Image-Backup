@@ -65,12 +65,13 @@ components:
 
 **Creative North Star: “Sicherheitsüberblick zuerst”**
 
-KIBM is a restrained operations surface for checking a Klipper host safely. The page makes the read-only boundary, current host status, and backup blockers legible before presenting system and storage details. The product commitment to protect the source installation shapes the visual hierarchy: diagnosis is explicit, and backup creation is clearly unavailable in this release.
+KIBM is a restrained operations surface for checking and backing up a Klipper host safely. The page makes the protected system card, current host status, and backup readiness legible before presenting system and storage details. PC mode downloads a full raw image. USB mode writes a full image by default and offers optional Pi-side shrinking with an explicit full-image retention choice.
 
 Near-black green-tinted backgrounds and charcoal panels keep dense measurements calm. Lime marks confirmed or interactive readiness cues; amber carries caution, and red marks blocked capabilities. A quiet Georgia display face gives the page a human entry point while compact monospace labels make machine values easy to scan.
 
 **Key Characteristics:**
-- Read-only status and backup readiness precede system details.
+- Protected source status and backup readiness precede system details.
+- Destination controls distinguish full PC downloads from optional USB shrinking.
 - Dense host measurements sit in quiet, separated panels.
 - Status colors communicate readiness, caution, and blocked capability.
 
@@ -153,7 +154,7 @@ Cards use gently rounded corners (8px), navigation links and status strips use c
 - **Style:** Desktop uses a fixed vertical rail with compact links and a subtly filled active row marked by a narrow lime edge. At mobile widths, it collapses to the brand bar and the links are hidden.
 
 ### Status and Readiness
-The overall status strip pairs a semantic state dot with a short title, explanatory sentence, and right-aligned host identifier. The readiness panel states that backup is unavailable, lists concrete blockers, and provides a recheck action. Use live reported values only; unknown and unavailable conditions keep their explicit labels.
+The overall status strip pairs a semantic state dot with a short title, explanatory sentence, and right-aligned host identifier. The readiness panel lists concrete blockers and provides a recheck action. Backup controls show the PC or USB destination, optional PiShrink, full-image retention, and a separate destructive USB-format confirmation. Use live reported values only; unknown and unavailable conditions keep their explicit labels.
 
 ### Storage Summary and Partitions
 The storage summary combines detected device facts, measured filesystem usage, and an estimate only when the service provides one. The partition table preserves compact monospace device paths and may scroll inside its labeled region on mobile; the surrounding page remains within the viewport.
@@ -161,13 +162,13 @@ The storage summary combines detected device facts, measured filesystem usage, a
 ## Do's and Don'ts
 
 ### Do:
-- **Do** communicate read-only behavior and current backup readiness before technical detail.
+- **Do** communicate that the running system card remains unchanged and show current backup readiness before technical detail.
 - **Do** explain each blocker in plain language and keep the safe prerequisite recheck visible.
 - **Do** show host, filesystem, and partition values only when supplied by the live service.
 - **Do** let the partition table scroll within its own labeled region on narrow screens.
 - **Do** retain the restrained Georgia headline, system body text, and monospace measurement roles.
 
 ### Don't:
-- **Don't** imply that backup creation, recovery boot, shrinking, streaming, or restore is available when it is not.
+- **Don't** imply that recovery boot or restore is available.
 - **Don't** fill missing measurements with sample values or style unknown status as confirmed readiness.
 - **Don't** let dense storage detail displace the readiness summary in the page hierarchy.

@@ -1,0 +1,30 @@
+[Unit]
+Description=KIBM USB image preparation worker
+After=local-fs.target systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=simple
+User=root
+Group=kibm
+RuntimeDirectory=kibm-media
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/python3 /opt/klipper-image-backup-manager/backend/kibm/media_worker.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/run/kibm-media
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_MKNOD CAP_CHOWN CAP_FOWNER
+
+[Install]
+WantedBy=multi-user.target

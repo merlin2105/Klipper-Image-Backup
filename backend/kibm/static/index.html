@@ -33,9 +33,9 @@
         <section class="page-heading">
           <div>
             <h1>Dein Drucker.<br><em>Im Blick.</em></h1>
-            <p class="lede">Systemdiagnose für sichere Backups. Diese Version liest nur — sie verändert nichts am Drucker.</p>
+            <p class="lede">Systemdiagnose und vollständige Sicherungen deiner Klipper-microSD. Die Systemkarte bleibt unverändert.</p>
           </div>
-          <div class="read-only-stamp"><svg class="stamp-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10.5 8.5 14 15 6.5"/></svg><span><b>NUR LESEND</b><small>Keine Änderungen am Pi</small></span></div>
+          <div class="read-only-stamp"><svg class="stamp-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10.5 8.5 14 15 6.5"/></svg><span><b>SYSTEMKARTE BLEIBT</b><small>USB-Ziel nur nach Auswahl</small></span></div>
         </section>
 
         <section class="status-strip" aria-label="Gesamtstatus">
@@ -46,22 +46,34 @@
 
         <section class="section-head"><div><h2>Backup-Bereitschaft</h2></div><span class="section-note">DIAGNOSE</span></section>
         <section id="backup" class="backup-panel panel">
-          <div class="backup-intro"><div><h3>Vollständiges SD-Karten-Image</h3><p id="backup-intro-copy">KIBM liest die gesamte System-microSD und überträgt die unkomprimierte Image-Datei direkt an deinen Browser. Auf dem Pi wird keine Image-Datei zwischengespeichert.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
+          <div class="backup-intro"><div><h3>Image der System-microSD</h3><p id="backup-intro-copy">Wähle, ob KIBM das vollständige Karten-Image direkt an den PC streamt oder auf einem USB-Stick sichert.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
           <div class="capability-row"><span id="printer-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">Druckerstatus</span><b>wird geprüft</b></span><span id="storage-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">System-microSD</span><b>wird geprüft</b></span><span id="read-capability"><i class="cap-no" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg></i><span class="capability-label">Leserechte</span><b>wird geprüft</b></span></div>
           <div class="backup-warning"><b>Live-Abbild:</b> Der Pi bleibt eingeschaltet. KIBM prüft während der Übertragung, dass kein Druck startet. Andere Systemdaten können sich währenddessen ändern.</div>
+          <div class="backup-choice">
+            <label for="backup-destination">Speicherziel</label>
+            <select id="backup-destination" name="backup-destination"><option value="pc">PC · vollständiges Image</option><option value="usb" disabled>USB-Stick wird gesucht …</option></select>
+            <p id="destination-description">Das vollständige Image wird direkt an den Browser übertragen. Es wird nicht geshrinkt.</p>
+          </div>
+          <div id="usb-options" class="usb-options" hidden>
+            <div class="usb-select-row"><label for="usb-device">Erkannter USB-Stick</label><select id="usb-device"><option value="">USB-Stick auswählen</option></select><button id="refresh-usb" class="text-button" type="button">Erneut suchen</button></div>
+            <label class="option-check"><input id="shrink-image" type="checkbox"><span><b>Image nach der vollständigen Sicherung mit PiShrink verkleinern</b><small>Der Shrink läuft auf dem Pi an der Image-Datei auf dem USB-Stick.</small></span></label>
+            <label id="keep-full-row" class="option-check nested-option" hidden><input id="keep-full-image" type="checkbox"><span><b>Vollständiges Image zusätzlich behalten</b><small>Wenn nicht aktiviert, wird das Voll-Image erst nach erfolgreichem Shrink gelöscht.</small></span></label>
+            <p class="usb-format-note"><b>USB-Stick wird als exFAT formatiert.</b> Vorhandene Daten auf dem ausgewählten Stick werden gelöscht. exFAT ermöglicht die Nutzung unter Windows, macOS und Linux.</p>
+          </div>
           <div class="backup-actions"><button id="start-backup" class="primary-button" type="button" disabled>Image auf PC speichern <span aria-hidden="true">↓</span></button><button id="preflight" class="secondary-button" type="button">Voraussetzungen erneut prüfen <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 7a5 5 0 1 0 1 3M13 3v4h-4"/></svg></button></div>
           <div id="preflight-message" class="preflight-message" role="status"></div>
-          <div id="backup-progress" class="backup-progress" hidden><div class="progress-copy"><b id="backup-progress-title">Übertragung wird vorbereitet</b><span id="backup-progress-value">0 %</span></div><progress id="backup-progress-bar" max="100" value="0" aria-label="Fortschritt der Image-Übertragung"></progress><p id="backup-progress-detail" role="status"></p><a id="backup-download" class="download-link" href="#" hidden>Datei im Browser speichern</a></div>
+          <div id="backup-progress" class="backup-progress" hidden><div class="progress-copy"><b id="backup-progress-title">Übertragung wird vorbereitet</b><span id="backup-progress-value">0 %</span></div><progress id="backup-progress-bar" max="100" value="0" aria-label="Fortschritt der Image-Übertragung"></progress><p id="backup-progress-detail" role="status"></p><a id="backup-download" class="download-link" href="#" hidden>Datei im Browser speichern</a><div id="usb-results" class="usb-results" hidden></div><button id="usb-eject" class="secondary-button" type="button" hidden>USB-Stick sicher auswerfen</button></div>
         </section>
 
         <dialog id="backup-login" class="backup-dialog" aria-labelledby="backup-dialog-title">
           <form id="backup-form">
             <h2 id="backup-dialog-title">Mit deinem Pi-Konto anmelden</h2>
-            <p>Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.</p>
+            <p id="backup-dialog-detail">Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.</p>
             <div id="pi-auth-fields"><label for="pi-password">Bestehendes Pi-Passwort</label><input id="pi-password" name="password" type="password" autocomplete="current-password" required></div>
             <label class="confirm-row"><input id="backup-confirm" type="checkbox" required><span>Ich bestätige, dass der Drucker im Standby ist und während der Übertragung nicht gestartet wird.</span></label>
+            <label id="format-confirm-row" class="confirm-row destructive-confirm" hidden><input id="format-confirm" type="checkbox"><span>Ich habe den ausgewählten USB-Stick geprüft. KIBM darf ihn vollständig löschen und als exFAT formatieren.</span></label>
             <p id="backup-login-error" class="error-text" role="alert"></p>
-            <div class="dialog-actions"><button id="backup-cancel" class="secondary-button" type="button">Abbrechen</button><button class="primary-button" type="submit">Image herunterladen <span aria-hidden="true">↓</span></button></div>
+            <div class="dialog-actions"><button id="backup-cancel" class="secondary-button" type="button">Abbrechen</button><button class="primary-button" type="submit"><span id="dialog-submit-label">Image herunterladen</span> <span aria-hidden="true">↓</span></button></div>
           </form>
         </dialog>
 

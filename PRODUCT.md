@@ -16,11 +16,11 @@ People running Klipper on a Raspberry Pi, including users without Linux administ
 
 ## Product Purpose
 
-KIBM will create and verify bootable, genuinely shrunk images of Klipper host SD cards, stream them to a PC, and help return the printer to normal operation. Success means an image is received and integrity checked, and a separately tested restore can boot on compatible hardware.
+KIBM creates full raw images of Klipper host microSD cards. Users can stream an unshrunk image directly to a PC, or write it to an explicitly selected USB drive and optionally shrink a second image copy on the Pi. Restore and recovery remain future work.
 
 ## Positioning
 
-The distinguishing mechanism is offline imaging through a recovery environment, followed by actual filesystem and partition shrinking. Compression alone does not qualify as shrinking and must not be presented as making an image fit on a smaller card.
+The Pi performs offline filesystem and partition shrinking on a staged image copy, never on the mounted running system. Shrinking is optional and available only for USB storage; PC downloads always remain full size. Compression alone does not qualify as shrinking and must not be presented as making an image fit on a smaller card.
 
 ## Operating Context
 
@@ -34,7 +34,7 @@ The primary target is Raspberry Pi 4 running Raspberry Pi OS or Debian-based Kli
 - Installer must be idempotent; boot-file backups and explicit confirmation are required before any future boot changes. Partition changes require separate explicit confirmation.
 - The service must be authenticated, CSRF-protected for mutations, and unprivileged. It must not expose arbitrary commands or public administrative endpoints.
 - Only measured values may appear as progress, speed, size estimates, or remaining time. A checksum does not prove that a restore boots.
-- The current code implements read-only diagnosis only. Recovery boot, offline imaging, shrinking, streaming, and restoration are unavailable and unverified.
+- PC full-image streaming, optional USB staging/shrinking, exFAT formatting, and browser downloads are implemented in the repository. USB hardware operation and PiShrink still require on-device validation. Recovery boot and restoration are unavailable.
 - Open question: exact recovery initramfs construction and supported boot-image matrix require Raspberry Pi 4 hardware testing before enablement.
 
 ## Brand Commitments
@@ -43,7 +43,7 @@ The product name is Klipper Image Backup Manager (KIBM). The interface should su
 
 ## Evidence on Hand
 
-The supplied project brief is the source for requirements. The current dashboard reads live host metadata, `lsblk`, filesystem usage, and Moonraker status where available. No Raspberry Pi hardware test, completed backup, successful restore, customer quote, or benchmark is available; none may be claimed.
+The supplied project brief is the source for requirements. The dashboard reads live host metadata, `lsblk`, filesystem usage, and Moonraker status where available. PC image streaming has been observed on the test Pi; a complete capture and the new USB/PiShrink path still need hardware validation. No successful restore, customer quote, or benchmark is available; none may be claimed.
 
 ## Product Principles
 

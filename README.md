@@ -1,15 +1,16 @@
 # Klipper Image Backup Manager (KIBM)
 
-KIBM is a safety-first dashboard and full raw SD-card imaging tool for Klipper hosts. It reads the complete system microSD and streams an uncompressed `.img` directly to the browser, where the user chooses the PC save location. It does **not** modify boot files, partitions, EEPROM, or printer configuration, and it does not yet provide recovery or shrinking.
+KIBM is a safety-first SD-card image tool for Klipper hosts. PC mode streams an uncompressed full-card `.img` directly to the browser. USB mode prepares an explicitly selected USB drive as exFAT, writes the full image there, and can optionally create a genuinely shrunk image with PiShrink on the Pi. The system microSD, boot files, EEPROM, and printer configuration are not modified.
 
 ## Current status
 
 - Phase 1 architecture and safety boundaries: documented in [`docs/architecture.md`](docs/architecture.md).
-- Dashboard, Pi-account authentication, local HTTPS, backup preflight, and full-card browser streaming: implemented; hardware validation remains open.
+- Dashboard, Pi-account authentication, local HTTPS, backup preflight, and full-card browser streaming: implemented.
+- USB destination selection, exFAT formatting, full-image capture, optional PiShrink, and browser download: implemented in the repository; USB hardware validation remains open.
 - Phase 3 recovery boot: a plan-only TRYBOOT bundle generator validates a supplied initramfs and can inspect a raw disk image read-only. It never writes to boot media. A Pi-specific initramfs and real hardware boot/return test are still required.
-- Shrinking and recovery: unavailable. The current raw image is a live capture; files can change while the Pi is running.
+- Recovery boot and restore: unavailable. The live capture can contain files that change while the Pi is running.
 
-Do not treat this release as a backup or recovery utility. The dashboard will say so explicitly.
+USB formatting deletes all existing files on the selected drive. Shrinking operates on a staged image copy, not the running system card. A completed checksum validates file data, not whether a restore will boot.
 
 ## Development
 
@@ -26,7 +27,7 @@ Install on a supported Pi with `sudo ./install.sh`, then open the HTTPS address 
 
 ## Safety
 
-The web service runs unprivileged. A small root-owned broker validates the existing Pi account password through PAM; it cannot run arbitrary commands. Moonraker being unavailable or returning an unknown printer state blocks imaging. See [`docs/security.md`](docs/security.md).
+The web service runs unprivileged. A root-owned PAM broker validates the existing Pi account password. A separate local media worker accepts only fixed image actions and revalidates USB identity before formatting; it does not expose arbitrary command execution. Moonraker being unavailable or returning an unknown printer state blocks capture. See [`docs/security.md`](docs/security.md).
 
 ## License
 

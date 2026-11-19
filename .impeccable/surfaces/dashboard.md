@@ -6,12 +6,12 @@
 
 **OWN-WORLD:** A dark, restrained operations surface: near-black green-tinted canvas, layered charcoal panels, thin separators, lime for confirmed readiness, amber for caution, and red for blocked capabilities. System measurements use compact data typography; the main title uses a quiet serif display face. Icons stay geometric and consistent.
 
-**STORY:** The user sees the actual host state, understands why backup preparation is blocked, can rerun the prerequisite check, and can inspect the live OS, Moonraker, disk, filesystem, and partition values. Unknown states remain blocked and explain the reason.
+**STORY:** The user sees the actual host state, understands backup readiness, can rerun the prerequisite check, and can inspect the live OS, Moonraker, disk, filesystem, and partition values. The user chooses PC streaming for a complete image or an explicitly selected USB target for a complete image with optional Pi-side shrinking. Unknown states remain blocked and explain the reason.
 
-**FIRST VIEWPORT:** Under the navigation and page title, show the read-only host status, then a compact backup-readiness panel with current blocker causes and a “Voraussetzungen erneut prüfen” action. System and printer details follow; storage facts and the complete partition table remain below.
+**FIRST VIEWPORT:** Under the navigation and page title, show that the system card remains unchanged, then backup readiness, destination choice, optional shrink and retention controls, formatting confirmation, and measured progress. System and printer details follow; storage facts and the complete partition table remain below.
 
 **FORM:** “Sicherheitsüberblick zuerst” (readiness-first), first of the assigned surface roll. Form seed key `0f000bf7`, recorded as the choice source by the `concept-seed --kind assigned --from 0f000bf7 --scope surface --mode operate` telemetry.
 
-**QUALITY BAR:** The first view quickly communicates safety and backup readiness. A non-specialist can identify the cause of a block and the next safe action. System detail remains available without fabricated sample values. At 390 px the page has no horizontal overflow; the partition table may scroll inside its labeled region. No backup, reboot, or boot-file modification is implied.
+**QUALITY BAR:** The first view quickly communicates safety and backup readiness. A non-specialist can identify the cause of a block and the next safe action. USB formatting is clearly destructive, capacity is checked before formatting, and the full image is preserved until the shrink output is verified. System detail remains available without fabricated sample values. At 390 px the page has no horizontal overflow; the partition table may scroll inside its labeled region. No recovery or restore capability is implied.
 
 **FINISH:** unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
