@@ -70,6 +70,7 @@ elif [[ ! -f /var/lib/kibm/managed-user ]]; then
 fi
 rm -f /etc/klipper-image-backup-manager.env
 
+systemctl stop kibm.service 2>/dev/null || true
 install -d -m 0755 /opt/klipper-image-backup-manager/backend
 cp -a backend/kibm /opt/klipper-image-backup-manager/backend/
 install -m 0644 pyproject.toml /opt/klipper-image-backup-manager/pyproject.toml
@@ -80,6 +81,27 @@ chmod -R a+rX /opt/klipper-image-backup-manager/venv
 install -m 0644 systemd/kibm.service /etc/systemd/system/kibm.service
 systemctl daemon-reload
 systemctl enable --now kibm.service
+if ! python3 - <<'PY'
+import time
+import urllib.error
+import urllib.request
+
+deadline = time.monotonic() + 20
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8765/api/system", timeout=2) as response:
+            if response.status == 200:
+                raise SystemExit(0)
+    except (OSError, urllib.error.URLError):
+        time.sleep(1)
+raise SystemExit(1)
+PY
+then
+  echo "KIBM wurde installiert, aber der Webdienst antwortet nicht." >&2
+  systemctl status kibm.service --no-pager -l >&2 || true
+  journalctl -u kibm.service -n 30 --no-pager >&2 || true
+  exit 1
+fi
 ip_address=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo "KIBM-Diagnose läuft unter http://${ip_address:-<drucker-ip>}:8765"
 echo "Backups und Recovery-Boot sind in dieser Version nicht verfügbar."

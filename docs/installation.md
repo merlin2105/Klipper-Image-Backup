@@ -13,3 +13,7 @@ The installer does not edit boot files, EEPROM settings, partitions, Klipper, Mo
 After installation, open `http://<printer-ip>:8765` from a browser on the trusted local network. This alpha uses HTTP; do not port-forward it to the internet. To remove it, run `sudo ./uninstall.sh`. Deinstallation removes only KIBM files and the KIBM service user marker/account; it never restores boot configuration because this version has not changed any.
 
 The current dashboard and API are unauthenticated and intended only for a trusted local network. Do not expose port 8765 to the internet.
+
+## Installer acceptance criteria
+
+The user should only need to obtain the repository, run `sudo ./install.sh`, and confirm the installation. The installer is responsible for prerequisites, service account and file permissions, Python environment, systemd setup, service startup, and an HTTP readiness check. It must report success only after `http://127.0.0.1:8765/api/system` returns HTTP 200. No follow-up shell commands should be required for a normal fresh install or an upgrade over a previous KIBM install.
