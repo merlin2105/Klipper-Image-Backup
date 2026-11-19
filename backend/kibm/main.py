@@ -58,7 +58,10 @@ def _authenticate_pi_password(password: str) -> bool:
         auth_socket.sendall(json.dumps({"password": password}).encode("utf-8") + b"\n")
         with auth_socket.makefile("rb") as stream:
             response = stream.readline(256)
-    return json.loads(response).get("authenticated") is True
+    result = json.loads(response)
+    if result.get("error") == "authentication_unavailable":
+        raise RuntimeError("Pi password authentication is unavailable")
+    return result.get("authenticated") is True
 
 
 @app.middleware("http")
@@ -126,7 +129,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=429, detail="Zu viele Anmeldeversuche. Bitte in zehn Minuten erneut versuchen.")
     try:
         authenticated = _authenticate_pi_password(body.password)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Pi-Anmeldung ist nicht erreichbar.") from exc
     if not authenticated:
         attempts.append(now)

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pwd
 import socket
 import socketserver
 import struct
 from pathlib import Path
+from typing import Optional
 
 SOCKET_PATH = Path("/run/kibm-auth/auth.sock")
 ADMIN_USER_PATH = Path("/etc/kibm/admin-user")
 MAX_REQUEST_BYTES = 2048
+logger = logging.getLogger("kibm.auth")
 
 
 class AuthHandler(socketserver.StreamRequestHandler):
@@ -34,15 +37,56 @@ class AuthHandler(socketserver.StreamRequestHandler):
                 self._reply(False)
                 return
             username = ADMIN_USER_PATH.read_text(encoding="utf-8").strip()
-            import pam
+            import PAM
 
-            authenticated = bool(pam.pam().authenticate(username, password, service="kibm"))
-        except Exception:
-            authenticated = False
+            auth = PAM.pam()
+            auth.start("kibm")
+            auth.set_item(PAM.PAM_USER, username)
+            auth.set_item(PAM.PAM_CONV, self._pam_conversation(username, password))
+            try:
+                auth.authenticate()
+                auth.acct_mgmt()
+                authenticated = True
+            except PAM.error as exc:
+                error_code = exc.args[0] if exc.args else None
+                if error_code != PAM.PAM_AUTH_ERR:
+                    logger.error("Pi account PAM check failed with code %s", error_code)
+                    self._reply(False, error="authentication_unavailable")
+                    return
+                authenticated = False
+        except Exception as exc:
+            # Keep operational failures distinct from a rejected password. Never log
+            # the request payload or password.
+            logger.error("Pi account authentication failed in the PAM broker (%s)", type(exc).__name__)
+            self._reply(False, error="authentication_unavailable")
+            return
         self._reply(authenticated)
 
-    def _reply(self, authenticated: bool) -> None:
-        self.wfile.write(json.dumps({"authenticated": authenticated}).encode("ascii") + b"\n")
+    @staticmethod
+    def _pam_conversation(username: str, password: str):
+        import PAM
+
+        def respond(_auth, queries, _user_data):
+            answers = []
+            for _query, prompt_type in queries:
+                if prompt_type == PAM.PAM_PROMPT_ECHO_ON:
+                    answer = username
+                elif prompt_type == PAM.PAM_PROMPT_ECHO_OFF:
+                    answer = password
+                elif prompt_type in (PAM.PAM_PROMPT_ERROR_MSG, PAM.PAM_PROMPT_TEXT_INFO):
+                    answer = ""
+                else:
+                    return None
+                answers.append((answer, 0))
+            return answers
+
+        return respond
+
+    def _reply(self, authenticated: bool, error: Optional[str] = None) -> None:
+        result = {"authenticated": authenticated}
+        if error:
+            result["error"] = error
+        self.wfile.write(json.dumps(result).encode("ascii") + b"\n")
 
 
 class AuthServer(socketserver.ThreadingUnixStreamServer):
