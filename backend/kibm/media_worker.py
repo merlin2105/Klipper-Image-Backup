@@ -7,7 +7,6 @@ import os
 import pwd
 import re
 import secrets
-import shutil
 import socket
 import socketserver
 import stat
@@ -28,6 +27,7 @@ SOURCE_DEVICE = "/dev/mmcblk0"
 PISHRINK_PATH = Path("/opt/klipper-image-backup-manager/tools/pishrink.sh")
 BLOCKGETSIZE64 = 0x80081272
 CHUNK_BYTES = 4 * 1024 * 1024
+USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_BYTES = 4096
 PRINTER_RECHECK_SECONDS = 10
 
@@ -190,6 +190,20 @@ def _hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _usb_image_bytes(image_size: int, shrink: bool) -> int:
+    # PiShrink copies the whole image before resizing its working copy.
+    return image_size * (2 if shrink else 1)
+
+
+def _check_usb_capacity(device: dict[str, Any], image_size: int, shrink: bool) -> None:
+    required = _usb_image_bytes(image_size, shrink) + USB_FORMAT_HEADROOM_BYTES
+    if int(device["size_bytes"]) < required:
+        raise ValueError(
+            f"Der USB-Stick ist zu klein. Diese Auswahl benötigt rund {required / 1024**3:.2f} GiB. "
+            "Es wurde nichts formatiert."
+        )
+
+
 def _set_job(**values: Any) -> None:
     with _lock:
         if _job:
@@ -205,23 +219,16 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         current_device = _selected_device(device["path"])
         if current_device["major_minor"] != device["major_minor"] or current_device["size_bytes"] != device["size_bytes"]:
             raise ValueError("Der USB-Stick wurde seit der Auswahl gewechselt. Es wurde nichts formatiert.")
-        raw_bytes = _disk_size(SOURCE_DEVICE)
-        # Shrinking is done into a second file first. The complete image remains
-        # intact until the smaller copy has passed validation.
-        required_bytes = raw_bytes * (2 if job.shrink else 1)
-        required_bytes += max(2 * 1024**3, raw_bytes // 10)
-        if int(device["size_bytes"]) < required_bytes:
-            raise ValueError(
-                "Der USB-Stick ist zu klein. Für diese Auswahl werden mindestens "
-                f"{required_bytes // (1024**3)} GiB benötigt. Es wurde nichts formatiert."
-            )
         if _disk_size(SOURCE_DEVICE) != job.image_size:
             raise ValueError("Die Größe der System-microSD hat sich geändert.")
+        _check_usb_capacity(current_device, job.image_size, job.shrink)
 
         _set_job(state="formatieren", phase="formatieren", message="USB-Stick wird als exFAT vorbereitet.")
         _format_usb(device)
-        available_bytes = shutil.disk_usage(VOLUME_PATH).free
-        if available_bytes < required_bytes:
+        filesystem = os.statvfs(VOLUME_PATH)
+        cluster_bytes = filesystem.f_frsize
+        allocated_image_bytes = ((job.image_size + cluster_bytes - 1) // cluster_bytes) * cluster_bytes
+        if filesystem.f_bavail * cluster_bytes < _usb_image_bytes(allocated_image_bytes, job.shrink):
             raise ValueError("Nach dem Formatieren steht nicht genug freier Platz für den sicheren Image-Ablauf zur Verfügung.")
         if _printer_active():
             raise ValueError("Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.")
@@ -347,12 +354,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
             raise ValueError("Größe der System-microSD nicht verfügbar.")
         shrink = request.get("shrink") is True
         keep_full = shrink and request.get("keep_full") is True
-        required_bytes = image_size * (2 if shrink else 1) + max(2 * 1024**3, image_size // 10)
-        if int(device["size_bytes"]) < required_bytes:
-            raise ValueError(
-                "Der USB-Stick ist zu klein. Für diese Auswahl werden mindestens "
-                f"{required_bytes // (1024**3)} GiB benötigt. Es wurde nichts formatiert."
-            )
+        _check_usb_capacity(device, image_size, shrink)
         job = MediaJob(
             job_id=secrets.token_urlsafe(20),
             state="wird vorbereitet", phase="vorbereitung", message="USB-Ziel wird geprüft.",

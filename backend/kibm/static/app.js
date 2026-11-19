@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+const USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024;
 let csrfToken = "";
 let readiness = null;
 let activeJobId = null;
@@ -158,7 +159,7 @@ function selectedUsbDevice() {
 function requiredUsbCapacity(shrink) {
   const imageSize = Number(readiness?.image_size_bytes);
   if (!Number.isFinite(imageSize) || imageSize <= 0) return 0;
-  return imageSize * (shrink ? 2 : 1) + Math.max(2 * 1024 ** 3, Math.floor(imageSize / 10));
+  return imageSize * (shrink ? 2 : 1) + USB_FORMAT_HEADROOM_BYTES;
 }
 
 function updateDestination() {
@@ -185,7 +186,7 @@ function updateDestination() {
   $("start-backup").disabled = !ready || Boolean(activeJobId) || (usbMode && (!device || targetTooSmall));
   let capacityMessage = "";
   if (targetTooSmall) {
-    const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString("de-DE", { maximumFractionDigits: 1 })} GiB`;
+    const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString("de-DE", { maximumFractionDigits: 2 })} GiB`;
     capacityMessage = `Zu wenig Platz: Der Stick hat ${gib(device.size_bytes)}. Diese Auswahl benötigt rund ${gib(minimumUsbBytes)}.`;
     if (shrink) capacityMessage += " PiShrink braucht während der Verarbeitung Platz für zwei vollständige Kopien plus Reserve.";
     capacityMessage += shrink && device.size_bytes >= requiredUsbCapacity(false)
