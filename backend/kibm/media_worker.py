@@ -19,7 +19,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 SOCKET_PATH = Path("/run/kibm-media/worker.sock")
 VOLUME_PATH = Path("/run/kibm-media/volume")
@@ -30,6 +30,7 @@ CHUNK_BYTES = 4 * 1024 * 1024
 USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_BYTES = 4096
 PRINTER_RECHECK_SECONDS = 10
+BUSY_STATES = {"wird vorbereitet", "formatieren", "sichern", "verifizieren", "schrumpfen"}
 
 
 @dataclass
@@ -42,8 +43,12 @@ class MediaJob:
     source_device: str
     shrink: bool
     keep_full: bool
+    verify_image: bool = True
     created_at: float = field(default_factory=time.time)
     sent_bytes: int = 0
+    verified_bytes: int = 0
+    shrink_bytes: int = 0
+    shrink_total_bytes: int = 0
     sha256: Optional[str] = None
     error: Optional[str] = None
     files: list[dict[str, Any]] = field(default_factory=list)
@@ -179,14 +184,18 @@ def _format_usb(device: dict[str, Any]) -> None:
     _run(["mount", "-t", "exfat", "-o", "rw", partition, str(VOLUME_PATH)])
 
 
-def _hash_file(path: Path) -> str:
+def _hash_file(path: Path, on_read: Optional[Callable[[int], None]] = None) -> str:
     digest = hashlib.sha256()
+    bytes_read = 0
     with path.open("rb") as image:
         while True:
             chunk = image.read(CHUNK_BYTES)
             if not chunk:
                 break
             digest.update(chunk)
+            if on_read is not None:
+                bytes_read += len(chunk)
+                on_read(bytes_read)
     return digest.hexdigest()
 
 
@@ -211,8 +220,18 @@ def _set_job(**values: Any) -> None:
                 setattr(_job, key, value)
 
 
+def _copy_for_shrink(source: Path, target: Path) -> None:
+    copied = 0
+    with source.open("rb") as reader, target.open("xb") as writer:
+        while chunk := reader.read(CHUNK_BYTES):
+            writer.write(chunk)
+            copied += len(chunk)
+            _set_job(shrink_bytes=copied)
+
+
 def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
     full_path: Optional[Path] = None
+    full_image_ready = False
     try:
         if _printer_active():
             raise ValueError("Moonraker meldet einen aktiven Druck. Es wurde noch nichts formatiert.")
@@ -264,17 +283,36 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
             os.close(source_fd)
         _set_job(sha256=digest.hexdigest())
 
-        _set_job(state="verifizieren", phase="verifizieren", message="Geschriebenes Image wird vom USB-Stick zurückgelesen und geprüft.")
-        if _hash_file(full_path) != digest.hexdigest():
-            raise OSError("Der SHA-256-Vergleich der geschriebenen USB-Image-Datei ist fehlgeschlagen.")
+        if job.verify_image:
+            _set_job(state="verifizieren", phase="verifizieren", message="Geschriebenes Image wird vom USB-Stick zurückgelesen und geprüft.")
+            if _hash_file(full_path, lambda count: _set_job(verified_bytes=count)) != digest.hexdigest():
+                raise OSError("Der SHA-256-Vergleich der geschriebenen USB-Image-Datei ist fehlgeschlagen.")
+        full_image_ready = True
 
         if job.shrink:
-            _set_job(state="schrumpfen", phase="schrumpfen", message="PiShrink verkleinert jetzt die Dateisystem- und Partitionsgröße.")
             final_path = VOLUME_PATH / f"{base}-geshrinkt.img"
-            _run([str(PISHRINK_PATH), "-ns", str(full_path), str(final_path)], timeout=60 * 60 * 4)
-            if not final_path.is_file() or final_path.stat().st_size <= 0 or final_path.stat().st_size >= job.image_size:
-                raise OSError("PiShrink hat kein kleineres, gültiges Image erzeugt.")
-            final_hash = _hash_file(final_path)
+            working_path = VOLUME_PATH / f".{job.job_id}.img.part"
+            _set_job(
+                state="schrumpfen", phase="kopie", shrink_total_bytes=job.image_size,
+                message="Arbeitskopie für PiShrink wird erstellt.",
+            )
+            try:
+                _copy_for_shrink(full_path, working_path)
+                _set_job(phase="verkleinern", message="PiShrink prüft und verkleinert Dateisystem und Partition.")
+                _run([str(PISHRINK_PATH), "-ns", str(working_path)], timeout=60 * 60 * 4)
+                final_size = working_path.stat().st_size
+                if not 0 < final_size < job.image_size:
+                    raise OSError("PiShrink hat kein kleineres, gültiges Image erzeugt.")
+                _set_job(
+                    phase="pruefsumme", shrink_bytes=0, shrink_total_bytes=final_size,
+                    message="Prüfsumme des verkleinerten Images wird berechnet.",
+                )
+                final_hash = _hash_file(working_path, lambda count: _set_job(shrink_bytes=count))
+                with working_path.open("rb") as image:
+                    os.fsync(image.fileno())
+                working_path.rename(final_path)
+            finally:
+                working_path.unlink(missing_ok=True)
             files = [{"filename": final_path.name, "size_bytes": final_path.stat().st_size, "sha256": final_hash, "kind": "geshrinkt"}]
             if job.keep_full:
                 files.insert(0, {"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": digest.hexdigest(), "kind": "vollständig"})
@@ -285,7 +323,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         _set_job(state="bereit", phase="fertig", message="Image ist auf dem USB-Stick gespeichert und kann heruntergeladen werden.", files=files)
     except Exception as exc:
         files = []
-        if full_path and full_path.is_file() and full_path.stat().st_size == job.image_size and job.sha256:
+        if full_image_ready and full_path and full_path.is_file() and full_path.stat().st_size == job.image_size:
             files.append({
                 "filename": full_path.name, "size_bytes": full_path.stat().st_size,
                 "sha256": job.sha256, "kind": "vollständig",
@@ -299,9 +337,10 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
 def _job_data(job: MediaJob) -> dict[str, Any]:
     return {
         "job_id": job.job_id, "state": job.state, "phase": job.phase, "message": job.message,
-        "image_size_bytes": job.image_size, "sent_bytes": job.sent_bytes,
+        "image_size_bytes": job.image_size, "sent_bytes": job.sent_bytes, "verified_bytes": job.verified_bytes,
+        "shrink_bytes": job.shrink_bytes, "shrink_total_bytes": job.shrink_total_bytes,
         "sha256": job.sha256, "error": job.error, "files": job.files,
-        "shrink": job.shrink, "keep_full": job.keep_full,
+        "shrink": job.shrink, "keep_full": job.keep_full, "verify_image": job.verify_image,
     }
 
 
@@ -346,9 +385,6 @@ class MediaHandler(socketserver.StreamRequestHandler):
         if not isinstance(path, str):
             raise ValueError("USB-Ziel fehlt.")
         device = _selected_device(path)
-        with _lock:
-            if _job and _job.state in {"formatieren", "sichern", "schrumpfen"}:
-                raise ValueError("Auf dem USB-Stick läuft bereits ein Auftrag.")
         image_size = _disk_size(SOURCE_DEVICE)
         if image_size <= 0:
             raise ValueError("Größe der System-microSD nicht verfügbar.")
@@ -359,8 +395,11 @@ class MediaHandler(socketserver.StreamRequestHandler):
             job_id=secrets.token_urlsafe(20),
             state="wird vorbereitet", phase="vorbereitung", message="USB-Ziel wird geprüft.",
             image_size=image_size, source_device=SOURCE_DEVICE, shrink=shrink, keep_full=keep_full,
+            verify_image=request.get("verify_image", True) is not False,
         )
         with _lock:
+            if _job and (_job.state in BUSY_STATES or _job.active_downloads):
+                raise ValueError("Auf dem USB-Stick läuft bereits ein Auftrag oder Download.")
             _job = job
         threading.Thread(target=_run_job, args=(job, device, socket.gethostname()), daemon=True).start()
         self._reply({"job": _job_data(job), "device": device})
@@ -405,7 +444,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
         with _lock:
             if not _job or _job.job_id != request.get("job_id"):
                 raise ValueError("USB-Auftrag nicht gefunden.")
-            if _job and _job.state in {"formatieren", "sichern", "schrumpfen"}:
+            if _job.state in BUSY_STATES:
                 raise ValueError("Der USB-Stick kann während eines laufenden Auftrags nicht ausgeworfen werden.")
             if _job and _job.active_downloads:
                 raise ValueError("Warte, bis der Browser-Download abgeschlossen ist, bevor du den Stick auswirfst.")

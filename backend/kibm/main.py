@@ -38,6 +38,7 @@ class UsbBackupRequest(BaseModel):
     device_path: str = Field(min_length=1, max_length=64)
     shrink: bool = False
     keep_full: bool = False
+    verify_image: bool = True
     confirmed: bool
     format_confirmed: bool
 
@@ -283,7 +284,7 @@ async def start_usb_backup(
     try:
         result = _media_request({
             "action": "start", "device_path": body.device_path, "shrink": body.shrink,
-            "keep_full": body.keep_full, "confirmed": body.format_confirmed,
+            "keep_full": body.keep_full, "verify_image": body.verify_image, "confirmed": body.format_confirmed,
         })
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc) or "USB-Image konnte nicht gestartet werden.") from exc

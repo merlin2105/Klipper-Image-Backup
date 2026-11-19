@@ -12,7 +12,7 @@ client = TestClient(app)
 def test_dashboard_is_available_without_auth() -> None:
     response = client.get("/")
     assert response.status_code == 200
-    assert "Systemstatus" in response.text
+    assert "Klipper Image Backup" in response.text
 
 
 def test_favicon_uses_the_static_svg() -> None:
@@ -101,6 +101,7 @@ def test_backup_job_endpoints_require_authentication() -> None:
 
 def test_backup_authentication_uses_existing_pi_password_and_csrf(monkeypatch) -> None:
     monkeypatch.setattr(main, "_authenticate_pi_password", lambda password: password == "existing-password")
+    monkeypatch.setattr(services, "klipper_status", lambda: {"safe_to_backup": False, "classification": "active"})
     response = client.post(
         "/api/login", json={"password": "existing-password"}, headers={"Origin": "http://testserver"}
     )
@@ -117,7 +118,7 @@ def test_backup_authentication_uses_existing_pi_password_and_csrf(monkeypatch) -
         headers={"Origin": "http://testserver", "X-KIBM-CSRF": csrf},
     )
     assert started.status_code == 409
-    assert "Standby" in started.json()["detail"]
+    assert "Druckauftrag läuft oder ist pausiert" in started.json()["detail"]
     assert client.post(
         "/api/logout", headers={"Origin": "http://testserver", "X-KIBM-CSRF": csrf}
     ).status_code == 200

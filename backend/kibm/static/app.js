@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 const USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024;
 let csrfToken = "";
 let readiness = null;
+let destination = null;
 let activeJobId = null;
 let activeJobType = "pc";
 let activeDownloadToken = "";
@@ -79,30 +80,26 @@ function renderReadiness(result) {
   $("image-estimate").textContent = size ? `${formatBytes(size)} · vollständige Karte` : "Größe nicht verfügbar";
   $("image-estimate-badge").textContent = result.backup_available ? "BEREIT" : "GESPERRT";
   $("image-estimate-badge").classList.toggle("estimate-ready", result.backup_available);
-  $("start-backup").disabled = !result.backup_available || Boolean(activeJobId);
   $("preflight-message").textContent = result.backup_available
     ? (printerUnknown
       ? "Kein Druckerstatus verfügbar. Starte nur, wenn sicher kein Druck läuft; die Bestätigung ist erforderlich."
-      : (isUsbDestination() ? "USB sichert standardmäßig die vollständige Karte. Shrinking ist optional." : "PC-Sicherung überträgt die gesamte Karte und bleibt ungeshrinkt."))
+      : "")
     : result.blockers.join(" ");
+  updateDestination();
 }
 
 function isUsbDestination() {
-  return $("backup-destination").value === "usb";
+  return destination === "usb";
 }
 
 async function loadUsbDevices() {
   if (usbScanInProgress) return;
   usbScanInProgress = true;
-  const destination = $("backup-destination");
-  const usbOption = destination.querySelector('option[value="usb"]');
   let signature;
   try {
     const result = await api("/api/backup/usb/devices");
     usbDevices = result.devices || [];
     signature = JSON.stringify(usbDevices.map(({ path, size_bytes, model }) => [path, size_bytes, model]).sort());
-    usbOption.disabled = usbDevices.length === 0;
-    usbOption.textContent = usbDevices.length ? `USB-Stick · ${usbDevices.length} erkannt` : "Kein USB-Stick erkannt";
     if (signature !== usbDeviceSignature) {
       const selectedPath = $("usb-device").value;
       $("usb-device").replaceChildren(new Option("USB-Stick auswählen", ""));
@@ -115,14 +112,15 @@ async function loadUsbDevices() {
   } catch (error) {
     usbDevices = [];
     signature = "unavailable";
-    usbOption.disabled = true;
-    usbOption.textContent = "USB-Erkennung nicht verfügbar";
     if (signature !== usbDeviceSignature) $("usb-device").replaceChildren(new Option("USB-Erkennung nicht verfügbar", ""));
   }
   const changed = signature !== usbDeviceSignature;
   usbDeviceSignature = signature;
   renderUsbDetection();
-  if (changed) updateDestination();
+  if (changed) {
+    $("format-confirm").checked = false;
+    updateDestination();
+  }
   usbScanInProgress = false;
 }
 
@@ -142,7 +140,9 @@ function renderUsbDetection() {
     state = "detected";
   } else if (usbDevices.length) {
     title = usbDevices.length === 1 ? "USB-Stick erkannt" : `${usbDevices.length} USB-Sticks erkannt`;
-    detail = "Wähle USB als Speicherziel. KIBM formatiert den Stick erst nach deiner Bestätigung.";
+    detail = isUsbDestination()
+      ? "Wähle den Stick in der Liste aus."
+      : "Wähle „USB-Stick · Sicherung“, um ein Image darauf zu speichern.";
     state = "detected";
   }
   status.dataset.state = state;
@@ -166,24 +166,22 @@ function updateDestination() {
   const usbMode = isUsbDestination();
   const device = selectedUsbDevice();
   const shrink = $("shrink-image").checked;
+  const running = Boolean(activeJobId);
+  $("destination-pc").disabled = running;
+  $("destination-usb").disabled = running || usbDevices.length === 0;
+  $("destination-pc").setAttribute("aria-pressed", String(destination === "pc"));
+  $("destination-usb").setAttribute("aria-pressed", String(usbMode));
+  $("pc-options").hidden = destination !== "pc";
   $("usb-options").hidden = !usbMode;
-  $("keep-full-row").hidden = !usbMode || !$("shrink-image").checked;
-  $("format-confirm-row").hidden = !usbMode;
-  $("format-confirm").required = usbMode;
-  $("backup-confirm").checked = false;
-  $("format-confirm").checked = false;
-  $("start-backup").textContent = usbMode ? "Vollständiges Image auf USB sichern" : "Image auf PC speichern";
-  $("start-backup").append(Object.assign(document.createElement("span"), { textContent: " ↓", ariaHidden: "true" }));
-  $("backup-intro-copy").textContent = usbMode
-    ? "KIBM sichert zuerst die gesamte microSD auf dem ausgewählten USB-Stick. Wenn aktiviert, schrumpft PiShrink anschließend die Image-Datei."
-    : "KIBM liest die gesamte System-microSD und streamt die unkomprimierte Image-Datei direkt zum Browser. Sie bleibt vollständig und wird nicht geshrinkt.";
-  $("destination-description").textContent = usbMode
-    ? "Der ausgewählte USB-Stick wird neu als exFAT formatiert. Ohne Shrink-Haken bleibt das vollständige Karten-Image erhalten."
-    : "Das vollständige Image wird direkt an den Browser übertragen. Es wird nicht geshrinkt.";
+  $("keep-full-row").hidden = !shrink;
+  $("backup-confirmations").hidden = !destination;
+  $("format-confirm-row").hidden = !usbMode || !device;
+  $("start-backup").hidden = !destination;
   const ready = Boolean(readiness?.backup_available);
   const minimumUsbBytes = requiredUsbCapacity(shrink);
   const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
-  $("start-backup").disabled = !ready || Boolean(activeJobId) || (usbMode && (!device || targetTooSmall));
+  $("start-backup").disabled = !destination || !ready || running || !$("backup-confirm").checked
+    || (usbMode && (!device || targetTooSmall || !$("format-confirm").checked));
   let capacityMessage = "";
   if (targetTooSmall) {
     const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString("de-DE", { maximumFractionDigits: 2 })} GiB`;
@@ -273,14 +271,31 @@ $("preflight").addEventListener("click", async () => {
   } catch (error) { $("preflight-message").textContent = error.message; }
 });
 
-$("backup-destination").addEventListener("change", updateDestination);
-$("usb-device").addEventListener("change", () => { renderUsbDetection(); updateDestination(); });
+for (const target of ["pc", "usb"]) {
+  $(`destination-${target}`).addEventListener("click", () => {
+    if (destination !== target) {
+      destination = target;
+      $("backup-confirm").checked = false;
+      $("format-confirm").checked = false;
+    }
+    renderUsbDetection();
+    updateDestination();
+  });
+}
+$("backup-confirm").addEventListener("change", updateDestination);
+$("format-confirm").addEventListener("change", updateDestination);
+$("usb-device").addEventListener("change", () => {
+  $("format-confirm").checked = false;
+  renderUsbDetection();
+  updateDestination();
+});
 $("shrink-image").addEventListener("change", updateDestination);
 $("refresh-usb").addEventListener("click", loadUsbDevices);
 
 $("start-backup").addEventListener("click", async () => {
   try {
     const session = await api("/api/session");
+    if ($("start-backup").disabled || $("backup-login").open) return;
     csrfToken = session.authenticated ? session.csrf_token : "";
     $("pi-auth-fields").hidden = session.authenticated;
     $("backup-dialog-title").textContent = session.authenticated ? "Image-Erstellung bestätigen" : "Mit deinem Pi-Konto anmelden";
@@ -288,11 +303,6 @@ $("start-backup").addEventListener("click", async () => {
     $("backup-login-error").textContent = "";
     $("pi-password").required = !session.authenticated;
     $("pi-password").value = "";
-    $("backup-confirm").checked = false;
-    $("format-confirm").checked = false;
-    $("backup-confirm").required = true;
-    $("format-confirm-row").hidden = !isUsbDestination();
-    $("format-confirm").required = isUsbDestination();
     if (isUsbDestination()) {
       const target = selectedUsbDevice();
       $("backup-dialog-detail").textContent = target
@@ -315,6 +325,9 @@ $("backup-login").addEventListener("cancel", () => { $("pi-password").value = ""
 
 $("backup-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const submit = event.submitter || $("backup-form").querySelector('button[type="submit"]');
+  if (submit.disabled) return;
+  submit.disabled = true;
   $("backup-login-error").textContent = "";
   try {
     if (!csrfToken) {
@@ -324,6 +337,9 @@ $("backup-form").addEventListener("submit", async (event) => {
       });
       csrfToken = login.csrf_token;
       $("pi-password").value = "";
+    }
+    if (!$("backup-login").open || $("start-backup").disabled) {
+      throw new Error("Prüfe Speicherziel und Bestätigungen erneut.");
     }
     let result;
     if (isUsbDestination()) {
@@ -335,6 +351,7 @@ $("backup-form").addEventListener("submit", async (event) => {
           device_path: target.path,
           shrink: $("shrink-image").checked,
           keep_full: $("keep-full-image").checked,
+          verify_image: $("verify-image").checked,
           confirmed: $("backup-confirm").checked,
           format_confirmed: $("format-confirm").checked,
         }),
@@ -351,6 +368,8 @@ $("backup-form").addEventListener("submit", async (event) => {
     }
     $("backup-login").close();
     activeJobId = result.job_id;
+    $("backup-confirm").checked = false;
+    $("format-confirm").checked = false;
     $("backup-progress").hidden = false;
     $("backup-progress-title").textContent = activeJobType === "usb" ? "USB-Auftrag gestartet" : "Download bereit";
     $("backup-progress-value").textContent = "0 %";
@@ -375,6 +394,8 @@ $("backup-form").addEventListener("submit", async (event) => {
     $("pi-password").value = "";
     $("backup-login-error").textContent = error.message;
     if (error.message.includes("Pi-Kontos")) csrfToken = "";
+  } finally {
+    submit.disabled = false;
   }
 });
 
@@ -427,6 +448,12 @@ async function pollTransfer() {
   }
 }
 
+function showMeasuredProgress(bytes, total) {
+  const percent = total ? Math.min(100, bytes / total * 100) : 0;
+  $("backup-progress-bar").value = percent;
+  $("backup-progress-value").textContent = `${Math.floor(percent)} %`;
+}
+
 async function pollUsbJob() {
   if (!activeJobId) return;
   try {
@@ -439,15 +466,20 @@ async function pollUsbJob() {
       $("backup-progress-bar").value = percent;
       $("backup-progress-detail").textContent = `${formatBytes(status.sent_bytes)} von ${formatBytes(status.image_size_bytes)} geschrieben.`;
     } else if (status.state === "schrumpfen") {
-      $("backup-progress-title").textContent = "Image wird auf dem Pi geschrumpft";
-      $("backup-progress-value").textContent = "PiShrink";
-      $("backup-progress-bar").removeAttribute("value");
-      $("backup-progress-detail").textContent = "Dateisystem und Partition werden offline verkleinert. Die Systemkarte bleibt unverändert.";
+      $("backup-progress-title").textContent = "Image wird auf dem Pi verkleinert";
+      if (["kopie", "pruefsumme"].includes(status.phase)) {
+        const step = status.phase === "kopie" ? 1 : 3;
+        showMeasuredProgress(status.shrink_bytes, status.shrink_total_bytes);
+        $("backup-progress-detail").textContent = `Schritt ${step}/3 · ${status.message} ${formatBytes(status.shrink_bytes)} von ${formatBytes(status.shrink_total_bytes)}.`;
+      } else {
+        $("backup-progress-value").textContent = "Schritt 2/3";
+        $("backup-progress-bar").removeAttribute("value");
+        $("backup-progress-detail").textContent = status.message;
+      }
     } else if (status.state === "verifizieren") {
       $("backup-progress-title").textContent = "Image auf dem USB-Stick wird geprüft";
-      $("backup-progress-value").textContent = "SHA-256";
-      $("backup-progress-bar").removeAttribute("value");
-      $("backup-progress-detail").textContent = "KIBM liest die gespeicherte Datei erneut und vergleicht sie mit den gelesenen Kartendaten.";
+      showMeasuredProgress(status.verified_bytes, status.image_size_bytes);
+      $("backup-progress-detail").textContent = `${formatBytes(status.verified_bytes)} von ${formatBytes(status.image_size_bytes)} für SHA-256 gelesen.`;
     } else if (status.state === "formatieren") {
       $("backup-progress-title").textContent = "USB-Stick wird vorbereitet";
       $("backup-progress-value").textContent = "exFAT";
@@ -467,7 +499,7 @@ async function pollUsbJob() {
       $("backup-progress-value").textContent = "Fehler";
       $("backup-progress-bar").removeAttribute("value");
       if ((status.files || []).length) {
-        $("backup-progress-detail").textContent = `Der Shrink ist fehlgeschlagen; das verifizierte vollständige Image ist erhalten. ${status.error || ""}`;
+        $("backup-progress-detail").textContent = `Der Shrink ist fehlgeschlagen. Das vollständige Image ist erhalten. ${status.error || ""}`;
         renderUsbFiles(status.files, usbJobId, activeDownloadToken);
       }
       $("usb-eject").hidden = false;
@@ -521,17 +553,6 @@ $("usb-eject").addEventListener("click", async () => {
     $("backup-progress-detail").textContent = error.message;
     $("usb-eject").disabled = false;
   }
-});
-
-document.querySelectorAll(".nav-link[href^='#']").forEach((link) => {
-  link.addEventListener("click", () => {
-    document.querySelectorAll(".nav-link").forEach((item) => {
-      item.classList.remove("active");
-      item.removeAttribute("aria-current");
-    });
-    link.classList.add("active");
-    link.setAttribute("aria-current", "page");
-  });
 });
 
 loadDashboard();

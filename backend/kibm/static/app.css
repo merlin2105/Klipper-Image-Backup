@@ -53,3 +53,66 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
   line-height: 1.6;
 }
 .usb-capacity-message:empty { display: none; }
+
+.main-content { margin-inline: auto; }
+.page-heading .dashboard-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 14px;
+  font: inherit;
+}
+.dashboard-brand .brand-mark { flex: none; }
+.dashboard-brand b,
+.dashboard-brand small { display: block; }
+.dashboard-brand b { font-size: 24px; line-height: 1.1; }
+.dashboard-brand small { margin-top: 4px; color: var(--muted); font-size: 14px; font-weight: 400; }
+.destination-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.destination-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 84px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.destination-card:hover:not(:disabled),
+.destination-card[aria-pressed="true"] { border-color: var(--acid); }
+.destination-card[aria-pressed="true"] { background: color-mix(in srgb, var(--panel-2), var(--acid) 7%); }
+.destination-card:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
+.destination-card:disabled { opacity: .55; cursor: not-allowed; }
+.destination-card svg {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  color: var(--acid);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.destination-card strong,
+.destination-card small { display: block; }
+.destination-card strong { font-size: 14px; }
+.destination-card small { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.usb-detection-status { margin-left: 0; }
+.pc-options { margin: 12px 0; color: var(--muted); font-size: 13px; }
+.backup-confirmations { margin: 14px 0; display: grid; gap: 8px; }
+.backup-panel [hidden] { display: none; }
+.backup-progress progress:indeterminate {
+  background: linear-gradient(90deg, transparent, var(--acid), transparent) 0 / 28% 100% no-repeat,
+    var(--line);
+}
+.backup-progress progress:indeterminate::-webkit-progress-bar { background: transparent; }
+@media (prefers-reduced-motion: no-preference) {
+  .backup-progress progress:indeterminate { animation: backup-activity 1.8s ease-in-out infinite alternate; }
+}
+@keyframes backup-activity { to { background-position: 100% 0; } }
+@media (max-width: 560px) { .destination-choices { grid-template-columns: 1fr; } }
