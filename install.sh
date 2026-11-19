@@ -5,8 +5,21 @@ if [[ ${EUID} -ne 0 ]]; then
   echo "Bitte mit sudo ausführen: sudo ./install.sh" >&2
   exit 1
 fi
-if [[ ! -r /etc/os-release ]] || ! . /etc/os-release || [[ ${ID:-} != debian && ${ID_LIKE:-} != *debian* ]]; then
-  echo "KIBM unterstützt derzeit nur Debian-basierte Systeme." >&2
+if [[ ! -r /etc/os-release ]] || ! . /etc/os-release; then
+  echo "Betriebssystem konnte nicht über /etc/os-release erkannt werden." >&2
+  exit 1
+fi
+os_id=${ID,,}
+os_like=" ${ID_LIKE,,} "
+debian_compatible=false
+if [[ ${os_id} == debian || ${os_like} == *" debian "* ]]; then
+  debian_compatible=true
+elif [[ ${os_id} == mainsailos && -r /etc/debian_version ]] && command -v apt-get >/dev/null && command -v dpkg-query >/dev/null; then
+  debian_compatible=true
+fi
+if [[ ${debian_compatible} != true ]]; then
+  echo "Nicht unterstütztes Betriebssystem: ${PRETTY_NAME:-unbekannt} (ID=${ID:-nicht gesetzt}, ID_LIKE=${ID_LIKE:-nicht gesetzt})." >&2
+  echo "KIBM unterstützt derzeit Debian und Debian-basierte Systeme; MainsailOS wird auf Raspberry Pi 4 unterstützt." >&2
   exit 1
 fi
 if [[ ! -f pyproject.toml || ! -d backend/kibm ]]; then

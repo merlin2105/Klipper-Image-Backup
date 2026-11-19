@@ -1,6 +1,6 @@
 # Installation
 
-The installer currently targets Raspberry Pi 4 running Debian-based Raspberry Pi OS. It prints detected hardware, OS, boot mounts, partition layout, and service/frontend presence before asking for confirmation. It installs only the read-only diagnostic service.
+The installer currently targets Raspberry Pi 4 running Debian-based Raspberry Pi OS or MainsailOS. MainsailOS is accepted only when Debian's version marker and the `apt-get`/`dpkg-query` tools are present. It prints detected hardware, OS, boot mounts, partition layout, and service/frontend presence before asking for confirmation. It installs only the read-only diagnostic service.
 
 ```sh
 git clone https://github.com/merlin2105/Klipper-Image-Backup.git
