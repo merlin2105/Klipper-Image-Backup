@@ -6,7 +6,7 @@ KIBM is an early, safety-first project for inspecting a Klipper host and prepari
 
 - Phase 1 architecture and safety boundaries: documented in [`docs/architecture.md`](docs/architecture.md).
 - Phase 2 read-only service and dashboard: implemented; deployment and Raspberry Pi validation remain open.
-- Phase 3 recovery boot: design only. It must be prototyped and tested on supported Pi 4 hardware before activation.
+- Phase 3 recovery boot: a plan-only TRYBOOT bundle generator validates a supplied initramfs and never writes to boot media. A Pi-specific initramfs and real hardware boot/return test are still required.
 - Imaging, shrinking, streaming, and restore validation: unavailable.
 
 Do not treat this release as a backup or recovery utility. The dashboard will say so explicitly.
