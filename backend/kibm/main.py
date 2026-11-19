@@ -6,6 +6,7 @@ import secrets
 import socket
 import time
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
@@ -40,7 +41,7 @@ def _session(request: Request) -> tuple[str, str]:
     return cookie, entry[0]
 
 
-def _require_csrf(request: Request, csrf_header: str | None) -> tuple[str, str]:
+def _require_csrf(request: Request, csrf_header: Optional[str]) -> tuple[str, str]:
     session_id, expected = _session(request)
     origin = request.headers.get("origin")
     if not origin or origin.rstrip("/") != str(request.base_url).rstrip("/"):
@@ -143,7 +144,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
 
 
 @app.post("/api/logout")
-async def logout(request: Request, response: Response, x_kibm_csrf: str | None = Header(default=None)):
+async def logout(request: Request, response: Response, x_kibm_csrf: Optional[str] = Header(default=None)):
     session_id, _ = _require_csrf(request, x_kibm_csrf)
     sessions.pop(session_id, None)
     response.delete_cookie("kibm_session", path="/", httponly=True, samesite="strict")
@@ -154,7 +155,7 @@ async def logout(request: Request, response: Response, x_kibm_csrf: str | None =
 async def start_backup(
     body: BackupRequest,
     request: Request,
-    x_kibm_csrf: str | None = Header(default=None),
+    x_kibm_csrf: Optional[str] = Header(default=None),
 ):
     session_id, _ = _require_csrf(request, x_kibm_csrf)
     if not body.confirmed:

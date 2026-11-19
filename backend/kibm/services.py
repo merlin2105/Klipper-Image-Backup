@@ -11,12 +11,12 @@ import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _read_text(path: str) -> str | None:
+def _read_text(path: str) -> Optional[str]:
     try:
         return Path(path).read_text(encoding="utf-8").strip() or None
     except (OSError, UnicodeError):
@@ -43,7 +43,7 @@ def system_info() -> dict[str, Any]:
     }
 
 
-def _flatten_devices(devices: list[dict[str, Any]], parent: str | None = None) -> list[dict[str, Any]]:
+def _flatten_devices(devices: list[dict[str, Any]], parent: Optional[str] = None) -> list[dict[str, Any]]:
     flattened: list[dict[str, Any]] = []
     for device in devices:
         name = str(device.get("name", ""))
@@ -101,7 +101,7 @@ def storage_info() -> dict[str, Any]:
         }
 
 
-def _root_usage() -> dict[str, int] | None:
+def _root_usage() -> Optional[dict[str, int]]:
     try:
         usage = shutil.disk_usage("/")
         return {"total_bytes": usage.total, "used_bytes": usage.used, "free_bytes": usage.free}

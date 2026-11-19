@@ -13,7 +13,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Iterator
+from typing import Iterator, Optional
 
 from . import services
 
@@ -38,8 +38,8 @@ class ImageJob:
     created_at: float = field(default_factory=time.time)
     state: str = "bereit"
     sent_bytes: int = 0
-    sha256: str | None = None
-    error: str | None = None
+    sha256: Optional[str] = None
+    error: Optional[str] = None
     download_claimed: bool = False
 
 
