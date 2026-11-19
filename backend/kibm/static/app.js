@@ -7,6 +7,8 @@ let activeDownloadToken = "";
 let usbJobId = null;
 let transferPoll = null;
 let usbDevices = [];
+let usbDeviceSignature = null;
+let usbScanInProgress = false;
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -89,31 +91,60 @@ function isUsbDestination() {
 }
 
 async function loadUsbDevices() {
+  if (usbScanInProgress) return;
+  usbScanInProgress = true;
   const destination = $("backup-destination");
   const usbOption = destination.querySelector('option[value="usb"]');
+  let signature;
   try {
     const result = await api("/api/backup/usb/devices");
     usbDevices = result.devices || [];
+    signature = JSON.stringify(usbDevices.map(({ path, size_bytes, model }) => [path, size_bytes, model]).sort());
     usbOption.disabled = usbDevices.length === 0;
     usbOption.textContent = usbDevices.length ? `USB-Stick · ${usbDevices.length} erkannt` : "Kein USB-Stick erkannt";
-    const selectedPath = $("usb-device").value;
-    $("usb-device").replaceChildren(new Option("USB-Stick auswählen", ""));
-    for (const device of usbDevices) {
-      const detail = device.model?.trim() || device.path;
-      const required = requiredUsbCapacity();
-      const tooSmall = !required || Number(device.size_bytes) < required;
-      const option = new Option(`${detail} · ${formatBytes(device.size_bytes)}${tooSmall ? " · zu klein" : ""}`, device.path);
-      option.disabled = tooSmall;
-      $("usb-device").append(option);
+    if (signature !== usbDeviceSignature) {
+      const selectedPath = $("usb-device").value;
+      $("usb-device").replaceChildren(new Option("USB-Stick auswählen", ""));
+      for (const device of usbDevices) {
+        const detail = device.model?.trim() || device.path;
+        const required = requiredUsbCapacity();
+        const tooSmall = !required || Number(device.size_bytes) < required;
+        const option = new Option(`${detail} · ${formatBytes(device.size_bytes)}${tooSmall ? " · zu klein" : ""}`, device.path);
+        option.disabled = tooSmall;
+        $("usb-device").append(option);
+      }
+      if (usbDevices.some((device) => device.path === selectedPath)) $("usb-device").value = selectedPath;
     }
-    if (usbDevices.some((device) => device.path === selectedPath)) $("usb-device").value = selectedPath;
   } catch (error) {
     usbDevices = [];
+    signature = "unavailable";
     usbOption.disabled = true;
     usbOption.textContent = "USB-Erkennung nicht verfügbar";
-    $("usb-device").replaceChildren(new Option("USB-Erkennung nicht verfügbar", ""));
+    if (signature !== usbDeviceSignature) $("usb-device").replaceChildren(new Option("USB-Erkennung nicht verfügbar", ""));
   }
-  updateDestination();
+  const changed = signature !== usbDeviceSignature;
+  usbDeviceSignature = signature;
+  renderUsbDetection();
+  if (changed) updateDestination();
+  usbScanInProgress = false;
+}
+
+function renderUsbDetection() {
+  const status = $("usb-detection-status");
+  const device = selectedUsbDevice();
+  if (usbDeviceSignature === "unavailable") {
+    status.textContent = "USB-Erkennung ist derzeit nicht erreichbar.";
+    status.className = "usb-detection-status unavailable";
+  } else if (device) {
+    status.textContent = `Erkannt: Ja · ${device.path} muss vor der Sicherung formatiert werden. Vorhandene Daten werden gelöscht.`;
+    status.className = "usb-detection-status detected";
+  } else if (usbDevices.length) {
+    status.textContent = `${usbDevices.length} USB-Stick${usbDevices.length === 1 ? "" : "s"} erkannt. Für USB-Sicherung auswählen; der Stick muss formatiert werden.`;
+    status.className = "usb-detection-status detected";
+  } else {
+    status.textContent = "Kein USB-Stick erkannt. Eingesteckte Sticks werden automatisch gesucht.";
+    status.className = "usb-detection-status";
+  }
 }
 
 function selectedUsbDevice() {
@@ -230,7 +261,7 @@ $("preflight").addEventListener("click", async () => {
 });
 
 $("backup-destination").addEventListener("change", updateDestination);
-$("usb-device").addEventListener("change", updateDestination);
+$("usb-device").addEventListener("change", () => { renderUsbDetection(); updateDestination(); });
 $("shrink-image").addEventListener("change", updateDestination);
 $("refresh-usb").addEventListener("click", loadUsbDevices);
 
@@ -491,3 +522,6 @@ document.querySelectorAll(".nav-link[href^='#']").forEach((link) => {
 });
 
 loadDashboard();
+window.setInterval(() => {
+  if (document.visibilityState === "visible") loadUsbDevices();
+}, 3000);

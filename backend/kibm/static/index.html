@@ -54,6 +54,7 @@
             <select id="backup-destination" name="backup-destination"><option value="pc">PC · vollständiges Image</option><option value="usb" disabled>USB-Stick wird gesucht …</option></select>
             <p id="destination-description">Das vollständige Image wird direkt an den Browser übertragen. Es wird nicht geshrinkt.</p>
           </div>
+          <p id="usb-detection-status" class="usb-detection-status" role="status">USB-Stick wird gesucht …</p>
           <div id="usb-options" class="usb-options" hidden>
             <div class="usb-select-row"><label for="usb-device">Erkannter USB-Stick</label><select id="usb-device"><option value="">USB-Stick auswählen</option></select><button id="refresh-usb" class="text-button" type="button">Erneut suchen</button></div>
             <label class="option-check"><input id="shrink-image" type="checkbox"><span><b>Image nach der vollständigen Sicherung mit PiShrink verkleinern</b><small>Der Shrink läuft auf dem Pi an der Image-Datei auf dem USB-Stick.</small></span></label>
