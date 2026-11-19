@@ -9,8 +9,10 @@ if [[ ! -r /etc/os-release ]] || ! . /etc/os-release; then
   echo "Betriebssystem konnte nicht über /etc/os-release erkannt werden." >&2
   exit 1
 fi
-os_id=${ID,,}
-os_like=" ${ID_LIKE,,} "
+os_id=${ID:-}
+os_id=${os_id,,}
+os_like_value=${ID_LIKE:-}
+os_like=" ${os_like_value,,} "
 debian_compatible=false
 if [[ ${os_id} == debian || ${os_like} == *" debian "* ]]; then
   debian_compatible=true
