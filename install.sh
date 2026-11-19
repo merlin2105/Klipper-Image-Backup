@@ -161,15 +161,25 @@ python3 -m venv /opt/klipper-image-backup-manager/venv
 chmod -R a+rX /opt/klipper-image-backup-manager/venv
 install -m 0644 systemd/kibm.service /etc/systemd/system/kibm.service
 systemctl daemon-reload
+wait_for_socket() {
+  local service=$1 socket_path=$2 deadline=$((SECONDS + 15))
+  while (( SECONDS < deadline )); do
+    if systemctl is-active --quiet "$service" && [[ -S "$socket_path" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
 systemctl enable --now kibm-auth.service
-if ! systemctl is-active --quiet kibm-auth.service || [[ ! -S /run/kibm-auth/auth.sock ]]; then
+if ! wait_for_socket kibm-auth.service /run/kibm-auth/auth.sock; then
   echo "Der Pi-Passwortdienst konnte seinen lokalen Socket nicht starten." >&2
   systemctl status kibm-auth.service --no-pager -l >&2 || true
   journalctl -u kibm-auth.service -n 30 --no-pager >&2 || true
   exit 1
 fi
 systemctl enable --now kibm-media.service
-if ! systemctl is-active --quiet kibm-media.service || [[ ! -S /run/kibm-media/worker.sock ]]; then
+if ! wait_for_socket kibm-media.service /run/kibm-media/worker.sock; then
   echo "Der USB-Image-Dienst konnte seinen lokalen Socket nicht starten." >&2
   systemctl status kibm-media.service --no-pager -l >&2 || true
   journalctl -u kibm-media.service -n 30 --no-pager >&2 || true
