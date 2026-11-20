@@ -22,7 +22,7 @@ SESSION_TTL_SECONDS = 4 * 60 * 60
 sessions: dict[str, tuple[str, float]] = {}
 login_attempts: dict[str, list[float]] = {}
 usb_jobs: dict[str, tuple[str, str]] = {}
-app = FastAPI(title="Klipper Image Backup Manager", version="0.2.6b1", docs_url=None, redoc_url=None)
+app = FastAPI(title="Klipper Image Backup Manager", version="0.2.7b1", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 
@@ -238,12 +238,12 @@ def delete_usb_image(body: UsbImageDeleteRequest, request: Request, x_kibm_csrf:
 
 
 @app.get("/api/update")
-def get_update_status():
+def get_update_status(refresh: bool = False):
     try:
         worker = _media_request({"action": "update_status"})
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
         worker = None
-    return updates.status(worker)
+    return updates.status(worker, force_refresh=refresh)
 
 
 @app.post("/api/update")

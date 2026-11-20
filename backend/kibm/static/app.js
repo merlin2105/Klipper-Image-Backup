@@ -264,11 +264,16 @@ function closeUpdateProgress() {
   $("update-progress-dialog").close();
 }
 
-async function refreshUpdateStatus() {
+async function refreshUpdateStatus(forceRefresh = false) {
+  const panel = $("update-panel");
+  if (panel.hidden) {
+    panel.hidden = false;
+    $("update-title").textContent = "Versionsprüfung läuft";
+    $("update-detail").textContent = `Installiert ${installedVersionLabel()} · GitHub-Version wird geprüft. Beim Pi-Start kann die erste Prüfung länger dauern.`;
+  }
   try {
-    const status = await api("/api/update", { signal: AbortSignal.timeout(7000) });
+    const status = await api(forceRefresh ? "/api/update?refresh=true" : "/api/update", { signal: AbortSignal.timeout(30000) });
     const worker = status.worker || {};
-    const panel = $("update-panel");
     const button = $("update-button");
     const checkButton = $("check-update-button");
     panel.hidden = false;
@@ -287,7 +292,7 @@ async function refreshUpdateStatus() {
         $("dashboard-content").removeAttribute("aria-busy");
         setUpdateProgress("failed", `Installer-Status ${worker.exit_status || "unbekannt"}. Logs: sudo kibm-admin logs.`);
       } else if (status.current_commit === targetCommit && worker.state !== "running") {
-        setUpdateProgress("success", `Installierter Commit ${targetCommit.slice(0, 8)}.`);
+        setUpdateProgress("success", `Installiert: ${status.current_version || installedVersionLabel()}.`);
       } else {
         const restarting = worker.state !== "running";
         setUpdateProgress(restarting ? "restarting" : "running", restarting
@@ -303,25 +308,25 @@ async function refreshUpdateStatus() {
       scheduleUpdatePoll();
     } else if (worker.state === "failed") {
       $("update-title").textContent = "Letztes Update fehlgeschlagen";
-      $("update-detail").textContent = `Der Installer wurde mit Status ${worker.exit_status || "unbekannt"} beendet. Logs: sudo kibm-admin logs.`;
+      $("update-detail").textContent = `Installiert ${status.current_version || installedVersionLabel()} · Installer-Status ${worker.exit_status || "unbekannt"}. Logs: sudo kibm-admin logs.`;
     } else if (status.check_error) {
       $("update-title").textContent = "GitHub-Version derzeit nicht erreichbar";
-      $("update-detail").textContent = "Sobald der Pi GitHub erreicht, wird die Versionsprüfung automatisch wiederholt.";
+      $("update-detail").textContent = `Installiert ${status.current_version || installedVersionLabel()} · ${status.check_error} Erneuter Versuch in 15 Sekunden.`;
       button.hidden = true;
       window.clearTimeout(updatePoll);
-      updatePoll = window.setTimeout(refreshUpdateStatus, 60000);
+      updatePoll = window.setTimeout(refreshUpdateStatus, 15000);
     } else if (status.update_available && !status.can_update) {
       $("update-title").textContent = "Update vorhanden · Web-Updater nicht bereit";
-      $("update-detail").textContent = "Diese ältere Installation muss einmalig per SSH mit sudo kibm-admin update aktualisiert werden. Danach kannst du Updates hier starten.";
+      $("update-detail").textContent = `Installiert ${status.current_version || installedVersionLabel()} · verfügbar ${status.latest_version || "Versionsnummer nicht abrufbar"}. Diese Installation muss einmalig per SSH mit sudo kibm-admin update vorbereitet werden.`;
     } else if (status.update_available) {
       $("update-title").textContent = "Update vorhanden";
-      const current = status.current_commit ? status.current_commit.slice(0, 8) : "unbekannt";
-      const latest = status.latest_commit.sha.slice(0, 8);
-      const dirty = status.current_dirty ? " · installierte Version enthält lokale Änderungen" : "";
+      const current = status.current_version || installedVersionLabel();
+      const latest = status.latest_version || "Versionsnummer nicht abrufbar";
+      const dirty = status.current_dirty ? " · lokale Änderungen erkannt" : "";
       $("update-detail").textContent = `${current} → ${latest}${dirty} · ${status.latest_commit.message}`;
     } else {
       $("update-title").textContent = "KIBM ist aktuell";
-      $("update-detail").textContent = `Installiert: ${(status.current_commit || "unbekannt").slice(0, 8)} · GitHub: ${status.latest_commit.sha.slice(0, 8)}.`;
+      $("update-detail").textContent = `Installiert ${status.current_version || installedVersionLabel()} · GitHub ${status.latest_version || "Versionsnummer nicht abrufbar"}.`;
     }
   } catch {
     const targetCommit = sessionStorage.getItem(UPDATE_TARGET_KEY);
@@ -333,11 +338,15 @@ async function refreshUpdateStatus() {
     }
     $("update-panel").hidden = false;
     $("update-button").hidden = true;
-    $("update-title").textContent = "Update-Status nicht verfügbar";
-    $("update-detail").textContent = "KIBM versucht die Versionsprüfung erneut.";
+    $("update-title").textContent = "Versionsprüfung dauert noch";
+    $("update-detail").textContent = `Installiert ${installedVersionLabel()} · KIBM oder GitHub antwortet noch nicht. Automatischer erneuter Versuch in 10 Sekunden.`;
     $("check-update-button").hidden = false;
     scheduleUpdatePoll(10000);
   }
+}
+
+function installedVersionLabel() {
+  return `v${$("kibm-version").textContent.trim()} Beta`;
 }
 
 async function loadExistingImages() {
@@ -514,7 +523,7 @@ $("check-update-button").addEventListener("click", async () => {
   $("update-detail").textContent = "KIBM fragt den aktuellen Stand von GitHub ab.";
   window.clearTimeout(updatePoll);
   try {
-    await refreshUpdateStatus();
+    await refreshUpdateStatus(true);
   } finally {
     button.disabled = false;
     button.textContent = "Auf Update prüfen";
@@ -616,8 +625,9 @@ $("update-button").addEventListener("click", async () => {
     $("update-password").required = !session.authenticated;
     $("update-password").value = "";
     $("update-error").textContent = "";
-    const latest = status.latest_commit?.sha?.slice(0, 8) || "unbekannt";
-    $("update-dialog-detail").textContent = `GitHub main · Commit ${latest}. KIBM lädt den Stand herunter und startet seine Dienste neu; die Oberfläche ist kurz nicht erreichbar.`;
+    const current = status.current_version || installedVersionLabel();
+    const latest = status.latest_version || "Versionsnummer nicht abrufbar";
+    $("update-dialog-detail").textContent = `${current} → ${latest}. KIBM lädt die GitHub-Version und startet seine Dienste neu; die Oberfläche ist kurz nicht erreichbar.`;
     $("update-dialog").showModal();
   } catch (error) {
     $("update-detail").textContent = error.message;
