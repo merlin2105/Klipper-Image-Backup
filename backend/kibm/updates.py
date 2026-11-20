@@ -5,7 +5,6 @@ import re
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -58,9 +57,9 @@ def _read_latest_commit() -> dict[str, str]:
     }
 
 
-def _read_latest_version() -> str:
+def _read_latest_version(commit_sha: str) -> str:
     request = urllib.request.Request(
-        f"https://raw.githubusercontent.com/{REPOSITORY}/main/pyproject.toml",
+        f"https://raw.githubusercontent.com/{REPOSITORY}/{commit_sha}/pyproject.toml",
         headers={"User-Agent": "KIBM-updater"},
     )
     with urllib.request.urlopen(request, timeout=5) as response:
@@ -92,11 +91,8 @@ def _latest_commit(*, force: bool = False) -> tuple[dict[str, str] | None, str |
     if not force and _cached_error and age < ERROR_CACHE_SECONDS:
         return _cached_commit, _cached_error
     try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            commit_future = pool.submit(_read_latest_commit)
-            version_future = pool.submit(_read_latest_version)
-            latest = commit_future.result()
-            latest["version"] = version_future.result()
+        latest = _read_latest_commit()
+        latest["version"] = _read_latest_version(latest["sha"])
         _cached_commit = latest
         _cached_error = None
     except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError) as error:
