@@ -101,7 +101,12 @@ def test_backup_job_endpoints_require_authentication() -> None:
 
 def test_backup_authentication_uses_existing_pi_password_and_csrf(monkeypatch) -> None:
     monkeypatch.setattr(main, "_authenticate_pi_password", lambda password: password == "existing-password")
-    monkeypatch.setattr(services, "klipper_status", lambda: {"safe_to_backup": False, "classification": "active"})
+    monkeypatch.setattr(main, "_ensure_update_idle", lambda: None)
+    monkeypatch.setattr(
+        services,
+        "backup_preflight",
+        lambda: {"backup_available": False, "blockers": ["Druckauftrag läuft oder ist pausiert"]},
+    )
     response = client.post(
         "/api/login", json={"password": "existing-password"}, headers={"Origin": "http://testserver"}
     )
