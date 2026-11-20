@@ -223,7 +223,38 @@ systemctl daemon-reload
 install_step="KIBM starten und prüfen"
 systemctl reset-failed "${units[@]}" 2>/dev/null || true
 systemctl enable --now "${units[@]}"
-python3 scripts/check-install.py "$printer_ip"
+if ! python3 - "$printer_ip" <<'PY'
+import json
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.request
+
+printer_ip = sys.argv[1]
+context = ssl._create_unverified_context()
+deadline = time.monotonic() + 30
+last_error = "keine Antwort"
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(
+            f"https://{printer_ip}:8765/api/health", timeout=3, context=context
+        ) as response:
+            result = json.loads(response.read(65536))
+            if response.status == 200 and result.get("ready") is True:
+                raise SystemExit(0)
+            last_error = f"Readiness-Prüfung meldet {result!r}"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        last_error = str(error)
+    time.sleep(1)
+print(f"KIBM wurde installiert, aber die Bereitschaftsprüfung schlug fehl: {last_error}", file=sys.stderr)
+raise SystemExit(1)
+PY
+then
+  systemctl status "${units[@]}" --no-pager -l >&2 || true
+  journalctl -b -u kibm.service -u kibm-auth.service -u kibm-media.service -n 35 --no-pager >&2 || true
+  exit 1
+fi
 if [[ $old_venv == "$install_dir"/venv.* && $old_venv != "$venv_path" ]]; then
   rm -rf -- "$old_venv"
 fi
