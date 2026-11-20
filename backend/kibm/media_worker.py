@@ -25,6 +25,9 @@ from typing import Any, Callable, Optional
 SOCKET_PATH = Path("/run/kibm-media/worker.sock")
 VOLUME_PATH = Path("/run/kibm-media/volume")
 SCAN_PATH = Path("/run/kibm-media/scan")
+# Root-owned; read by `kibm-admin update-run` so the update installs exactly the
+# commit the user confirmed in the dashboard.
+UPDATE_COMMIT_PATH = Path("/run/kibm-media/update-commit")
 SOURCE_DEVICE = "/dev/mmcblk0"
 PISHRINK_PATH = Path("/opt/klipper-image-backup-manager/tools/pishrink.sh")
 BLOCKGETSIZE64 = 0x80081272
@@ -569,7 +572,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
             elif action == "update_status":
                 self._update_status()
             elif action == "update_start":
-                self._update_start()
+                self._update_start(request)
             else:
                 self._reply({"error": "unsupported_action"})
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
@@ -759,7 +762,10 @@ class MediaHandler(socketserver.StreamRequestHandler):
             "usb_mounted": os.path.ismount(str(VOLUME_PATH)),
         })
 
-    def _update_start(self) -> None:
+    def _update_start(self, request: dict[str, Any]) -> None:
+        commit = request.get("commit")
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError("Die bestätigte Update-Version ist ungültig.")
         with _lock:
             if _job and (_job.state in BUSY_STATES or _job.active_downloads):
                 raise ValueError("Warte, bis das USB-Image fertig ist und alle Downloads abgeschlossen sind.")
@@ -768,7 +774,17 @@ class MediaHandler(socketserver.StreamRequestHandler):
         status = _run(["systemctl", "show", "kibm-update.service", "--property=ActiveState", "--value"], timeout=10).stdout.strip()
         if status in {"active", "activating", "deactivating"}:
             raise ValueError("Ein Update läuft bereits.")
-        _run(["systemctl", "start", "--no-block", "kibm-update.service"], timeout=10)
+        staged = UPDATE_COMMIT_PATH.with_name(UPDATE_COMMIT_PATH.name + ".tmp")
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as handle:
+            handle.write(commit + "\n")
+        os.chmod(staged, 0o600)
+        staged.replace(UPDATE_COMMIT_PATH)
+        try:
+            _run(["systemctl", "start", "--no-block", "kibm-update.service"], timeout=10)
+        except BaseException:
+            UPDATE_COMMIT_PATH.unlink(missing_ok=True)
+            raise
         self._reply({"state": "running"})
 
     def _reply(self, result: dict[str, Any]) -> None:

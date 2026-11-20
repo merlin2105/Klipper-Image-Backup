@@ -881,7 +881,7 @@ async function pollTransfer() {
       renderReadiness(readiness);
       return;
     }
-    if (["fehler", "abgebrochen"].includes(status.state)) {
+    if (["fehler", "abgebrochen", "abgelaufen"].includes(status.state)) {
       $("backup-progress-title").textContent = "Image unvollständig";
       $("backup-progress-detail").textContent = status.error || "Die Übertragung wurde nicht vollständig abgeschlossen.";
       activeJobId = null;

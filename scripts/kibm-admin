@@ -32,6 +32,8 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
     exec /usr/bin/systemctl status kibm.service kibm-media.service --no-pager -l
     ;;
   update)
+    # Manual SSH update: install the current GitHub main, not an older web confirmation.
+    /usr/bin/rm -f -- /run/kibm-media/update-commit
     exec /usr/local/sbin/kibm-admin update-run
     ;;
   update-run)
@@ -44,6 +46,15 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
       https://api.github.com/repos/merlin2105/Klipper-Image-Backup/commits/main \
       | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
     [[ $latest =~ ^[0-9a-f]{40}$ ]] || { echo "GitHub hat keine gültige Commit-ID geliefert." >&2; exit 1; }
+    if [[ -f /run/kibm-media/update-commit ]]; then
+      confirmed=$(/usr/bin/cat /run/kibm-media/update-commit)
+      /usr/bin/rm -f -- /run/kibm-media/update-commit
+      [[ $confirmed =~ ^[0-9a-f]{40}$ ]] || { echo "Die bestätigte Update-Version ist ungültig." >&2; exit 1; }
+      if [[ $confirmed != "$latest" ]]; then
+        echo "GitHub-Stand hat sich seit der Bestätigung geändert (bestätigt $confirmed, aktuell $latest). Bitte im Dashboard erneut auf Update prüfen." >&2
+        exit 1
+      fi
+    fi
     current=$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("commit", ""))' \
       /opt/klipper-image-backup-manager/build-info.json 2>/dev/null || true)
     dirty=$(/usr/bin/python3 -c 'import json,sys; print(str(bool(json.load(open(sys.argv[1])).get("dirty", False))).lower())' \

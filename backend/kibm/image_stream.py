@@ -23,7 +23,9 @@ PRINTER_RECHECK_SECONDS = 10
 _lock = threading.Lock()
 _jobs: dict[str, "ImageJob"] = {}
 JOB_TTL_SECONDS = 60 * 60
+UNCLAIMED_TTL_SECONDS = 5 * 60
 MAX_RETAINED_JOBS = 10
+EXPIRED_MESSAGE = "Der Download wurde nicht rechtzeitig gestartet. Bitte das Image erneut anfordern."
 
 
 @dataclass
@@ -43,9 +45,20 @@ class ImageJob:
     download_claimed: bool = False
 
 
+def _expire_unclaimed_jobs() -> None:
+    # Caller holds _lock. A job whose download never started must not block
+    # new images or updates for the whole job lifetime.
+    cutoff = time.time() - UNCLAIMED_TTL_SECONDS
+    for job in _jobs.values():
+        if job.state == "bereit" and job.created_at < cutoff:
+            job.state = "abgelaufen"
+            job.error = EXPIRED_MESSAGE
+
+
 def has_active_job() -> bool:
     cutoff = time.time() - JOB_TTL_SECONDS
     with _lock:
+        _expire_unclaimed_jobs()
         return any(
             job.created_at >= cutoff and job.state in {"bereit", "streaming"}
             for job in _jobs.values()
@@ -80,6 +93,7 @@ def create_job(session_id: str, device: dict) -> dict:
         os.close(fd)
 
     with _lock:
+        _expire_unclaimed_jobs()
         cutoff = time.time() - JOB_TTL_SECONDS
         for stale_id in [key for key, item in _jobs.items() if item.created_at < cutoff and item.state != "streaming"]:
             _jobs.pop(stale_id, None)
@@ -112,6 +126,7 @@ def create_job(session_id: str, device: dict) -> dict:
 
 def job_status(job_id: str, session_id: str) -> dict:
     with _lock:
+        _expire_unclaimed_jobs()
         job = _jobs.get(job_id)
         if not job or not hmac.compare_digest(job.session_id, session_id):
             raise KeyError(job_id)
@@ -127,6 +142,7 @@ def job_status(job_id: str, session_id: str) -> dict:
 
 def claim_download(job_id: str, session_id: str, token: str) -> ImageJob:
     with _lock:
+        _expire_unclaimed_jobs()
         job = _jobs.get(job_id)
         if (
             not job
@@ -145,6 +161,9 @@ def stream_job(job: ImageJob) -> Iterator[bytes]:
     digest = hashlib.sha256()
     sent = 0
     next_printer_check = time.monotonic()
+    with _lock:
+        if job.state != "bereit":
+            raise OSError("Der Image-Auftrag ist nicht mehr bereit.")
     try:
         fd = os.open(job.source_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         info = os.fstat(fd)

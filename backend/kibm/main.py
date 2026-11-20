@@ -4,6 +4,7 @@ import hmac
 import json
 import secrets
 import socket
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,7 @@ MEDIA_SOCKET = "/run/kibm-media/worker.sock"
 SESSION_TTL_SECONDS = 4 * 60 * 60
 sessions: dict[str, tuple[str, float]] = {}
 login_attempts: dict[str, list[float]] = {}
+login_lock = threading.Lock()
 usb_jobs: dict[str, tuple[str, str]] = {}
 app = FastAPI(title="Klipper Image Backup Manager", version="0.2.10b1", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
@@ -170,7 +172,7 @@ async def favicon():
 
 
 @app.get("/api/system")
-async def get_system():
+def get_system():
     return services.system_info()
 
 
@@ -191,7 +193,7 @@ def get_health(response: Response):
 
 
 @app.get("/api/storage")
-async def get_storage():
+def get_storage():
     return services.storage_info()
 
 
@@ -201,17 +203,17 @@ def get_system_metrics():
 
 
 @app.get("/api/klipper/status")
-async def get_klipper_status():
+def get_klipper_status():
     return services.klipper_status()
 
 
 @app.get("/api/backup/preflight")
-async def get_backup_preflight():
+def get_backup_preflight():
     return services.backup_preflight()
 
 
 @app.get("/api/backup/usb/devices")
-async def get_usb_devices():
+def get_usb_devices():
     try:
         return _media_request({"action": "devices"})
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
@@ -260,7 +262,7 @@ def start_update(body: UpdateRequest, request: Request, csrf_header: Optional[st
             raise HTTPException(status_code=409, detail="Es ist kein neues GitHub-Update verfügbar.")
         if not current["can_update"]:
             raise HTTPException(status_code=503, detail="Der Web-Updater ist auf dieser Installation nicht bereit.")
-        return _media_request({"action": "update_start"})
+        return _media_request({"action": "update_start", "commit": current["latest_commit"]["sha"]})
     except HTTPException:
         raise
     except json.JSONDecodeError as exc:
@@ -283,25 +285,32 @@ async def get_session(request: Request):
 
 
 @app.post("/api/login")
-async def login(body: LoginRequest, request: Request, response: Response):
+def login(body: LoginRequest, request: Request, response: Response):
     origin = request.headers.get("origin")
     if not origin or origin.rstrip("/") != str(request.base_url).rstrip("/"):
         raise HTTPException(status_code=403, detail="Ungültiger Origin.")
     client_address = request.client.host if request.client else "unknown"
     now = time.time()
-    attempts = [stamp for stamp in login_attempts.get(client_address, []) if stamp > now - 600]
-    if len(attempts) >= 5:
+    # Logins run in the threadpool. Reserve the attempt before the PAM check so
+    # parallel requests cannot bypass the limit.
+    with login_lock:
+        attempts = [stamp for stamp in login_attempts.get(client_address, []) if stamp > now - 600]
+        if len(attempts) >= 5:
+            login_attempts[client_address] = attempts
+            raise HTTPException(status_code=429, detail="Zu viele Anmeldeversuche. Bitte in zehn Minuten erneut versuchen.")
+        attempts.append(now)
         login_attempts[client_address] = attempts
-        raise HTTPException(status_code=429, detail="Zu viele Anmeldeversuche. Bitte in zehn Minuten erneut versuchen.")
     try:
         authenticated = _authenticate_pi_password(body.password)
     except (OSError, ValueError, RuntimeError) as exc:
+        with login_lock:
+            if now in login_attempts.get(client_address, []):
+                login_attempts[client_address].remove(now)
         raise HTTPException(status_code=503, detail="Pi-Anmeldung ist nicht erreichbar.") from exc
     if not authenticated:
-        attempts.append(now)
-        login_attempts[client_address] = attempts
         raise HTTPException(status_code=401, detail="Das Passwort des Pi-Kontos ist falsch.")
-    login_attempts.pop(client_address, None)
+    with login_lock:
+        login_attempts.pop(client_address, None)
     session_id = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
     sessions[session_id] = (csrf, time.time() + SESSION_TTL_SECONDS)
@@ -321,7 +330,7 @@ async def logout(request: Request, response: Response, x_kibm_csrf: Optional[str
 
 
 @app.post("/api/backup/start")
-async def start_backup(
+def start_backup(
     body: BackupRequest,
     request: Request,
     x_kibm_csrf: Optional[str] = Header(default=None),
@@ -350,7 +359,7 @@ async def backup_job_status(job_id: str, request: Request):
 
 
 @app.get("/api/backup/download/{job_id}")
-async def download_backup(job_id: str, request: Request, token: str):
+def download_backup(job_id: str, request: Request, token: str):
     session_id, _ = _session(request)
     _ensure_update_idle()
     try:
@@ -371,7 +380,7 @@ async def download_backup(job_id: str, request: Request, token: str):
 
 
 @app.post("/api/backup/usb/start")
-async def start_usb_backup(
+def start_usb_backup(
     body: UsbBackupRequest,
     request: Request,
     x_kibm_csrf: Optional[str] = Header(default=None),
@@ -419,7 +428,7 @@ def _start_media_job(session_id: str, payload: dict) -> dict:
 
 
 @app.get("/api/backup/usb/jobs/{job_id}")
-async def usb_backup_status(job_id: str, request: Request):
+def usb_backup_status(job_id: str, request: Request):
     session_id, _ = _session(request)
     owner = usb_jobs.get(job_id)
     if not owner or not hmac.compare_digest(owner[0], session_id):
@@ -432,7 +441,7 @@ async def usb_backup_status(job_id: str, request: Request):
 
 
 @app.get("/api/backup/usb/download/{job_id}/{filename}")
-async def download_usb_image(job_id: str, filename: str, request: Request, token: str):
+def download_usb_image(job_id: str, filename: str, request: Request, token: str):
     session_id, _ = _session(request)
     owner = usb_jobs.get(job_id)
     if not owner or not hmac.compare_digest(owner[0], session_id) or not hmac.compare_digest(owner[1], token):
@@ -458,7 +467,7 @@ async def download_usb_image(job_id: str, filename: str, request: Request, token
 
 
 @app.post("/api/backup/usb/eject")
-async def eject_usb(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+def eject_usb(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
     _require_csrf(request, x_kibm_csrf)
     try:
         return _media_request({"action": "eject"})

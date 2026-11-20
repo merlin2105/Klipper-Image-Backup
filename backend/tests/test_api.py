@@ -139,3 +139,115 @@ def test_authenticated_session_cookie_is_secure_over_https(monkeypatch) -> None:
         )
     assert response.status_code == 200
     assert "secure" in response.headers["set-cookie"].lower()
+
+
+def test_slow_pi_login_does_not_block_other_requests(monkeypatch) -> None:
+    import asyncio
+    import time
+
+    import httpx
+
+    def slow_password_check(_password):
+        time.sleep(0.5)
+        return False
+
+    monkeypatch.setattr(main, "_authenticate_pi_password", slow_password_check)
+    monkeypatch.setattr(main, "login_attempts", {})
+
+    async def scenario() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as async_client:
+            login = asyncio.create_task(async_client.post(
+                "/api/login", json={"password": "wrong"}, headers={"Origin": "http://testserver"}
+            ))
+            await asyncio.sleep(0.05)
+            started = time.monotonic()
+            session = await async_client.get("/api/session")
+            assert session.status_code == 200
+            assert time.monotonic() - started < 0.3, "The event loop was blocked by the PAM check."
+            assert not login.done()
+            assert (await login).status_code == 401
+
+    asyncio.run(scenario())
+
+
+def test_routes_with_blocking_io_run_in_the_threadpool() -> None:
+    import inspect
+
+    blocking_routes = {
+        ("POST", "/api/login"), ("POST", "/api/backup/start"), ("GET", "/api/backup/download/{job_id}"),
+        ("GET", "/api/storage"), ("GET", "/api/klipper/status"), ("GET", "/api/backup/preflight"),
+        ("GET", "/api/backup/usb/devices"), ("POST", "/api/backup/usb/start"),
+        ("GET", "/api/backup/usb/jobs/{job_id}"), ("GET", "/api/backup/usb/download/{job_id}/{filename}"),
+        ("POST", "/api/backup/usb/eject"), ("GET", "/api/system"),
+    }
+    found = set()
+    for route in app.routes:
+        for method in getattr(route, "methods", set()):
+            if (method, route.path) in blocking_routes:
+                found.add((method, route.path))
+                assert not inspect.iscoroutinefunction(route.endpoint), f"{method} {route.path} blocks the event loop"
+    assert found == blocking_routes
+
+
+def test_parallel_login_attempts_respect_the_rate_limit(monkeypatch) -> None:
+    import asyncio
+    import threading
+    import time
+
+    import httpx
+
+    calls = []
+    calls_lock = threading.Lock()
+
+    def slow_wrong_password(_password):
+        with calls_lock:
+            calls.append(1)
+        time.sleep(0.2)
+        return False
+
+    monkeypatch.setattr(main, "_authenticate_pi_password", slow_wrong_password)
+    monkeypatch.setattr(main, "login_attempts", {})
+
+    async def scenario() -> list[int]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as async_client:
+            responses = await asyncio.gather(*[
+                async_client.post("/api/login", json={"password": "wrong"}, headers={"Origin": "http://testserver"})
+                for _ in range(10)
+            ])
+        return [response.status_code for response in responses]
+
+    statuses = asyncio.run(scenario())
+    assert len(calls) == 5
+    assert statuses.count(401) == 5
+    assert statuses.count(429) == 5
+
+
+def test_update_start_passes_the_confirmed_commit_to_the_worker(monkeypatch) -> None:
+    confirmed_sha = "a" * 40
+    sent = []
+
+    def fake_media_request(payload):
+        sent.append(payload)
+        if payload["action"] == "update_status":
+            return {"available": True, "state": "idle"}
+        return {"state": "running"}
+
+    monkeypatch.setattr(main, "_authenticate_pi_password", lambda _password: True)
+    monkeypatch.setattr(main, "login_attempts", {})
+    monkeypatch.setattr(main, "_media_request", fake_media_request)
+    monkeypatch.setattr(main.image_stream, "has_active_job", lambda: False)
+    monkeypatch.setattr(main.updates, "status", lambda _worker, **_kwargs: {
+        "update_available": True, "can_update": True, "latest_commit": {"sha": confirmed_sha},
+    })
+    with TestClient(app) as update_client:
+        csrf = update_client.post(
+            "/api/login", json={"password": "existing-password"}, headers={"Origin": "http://testserver"}
+        ).json()["csrf_token"]
+        response = update_client.post(
+            "/api/update", json={"confirmed": True},
+            headers={"Origin": "http://testserver", "X-KIBM-CSRF": csrf},
+        )
+    assert response.status_code == 200
+    assert sent[-1] == {"action": "update_start", "commit": confirmed_sha}
