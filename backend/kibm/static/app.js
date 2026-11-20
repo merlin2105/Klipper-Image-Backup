@@ -182,14 +182,37 @@ async function loadUsbDevices() {
 
 function renderExistingImages(images) {
   const select = $("existing-image");
+  const choices = $("existing-image-choices");
   const selected = select.value;
   usbImages = images;
   select.replaceChildren(new Option("Image auswählen", ""));
+  choices.replaceChildren();
   for (const image of images) {
     const status = image.shrinkability?.status === "shrinkable"
       ? `noch ca. ${formatBytes(image.shrinkability.estimated_savings_bytes)} verkleinerbar`
       : image.shrinkability?.status === "already_compact" ? "bereits kompakt" : "nicht sicher prüfbar";
     select.append(new Option(`${image.filename} · ${formatBytes(image.size_bytes)} · ${status}`, image.id));
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.className = "existing-image-choice";
+    choice.dataset.imageId = image.id;
+    choice.setAttribute("aria-pressed", String(image.id === selected));
+    choice.setAttribute("aria-label", `${image.filename}, ${formatBytes(image.size_bytes)}, ${status}`);
+    const filename = document.createElement("strong");
+    filename.textContent = image.filename;
+    const size = document.createElement("small");
+    size.textContent = formatBytes(image.size_bytes);
+    const analysis = document.createElement("span");
+    analysis.textContent = status;
+    choice.append(filename, size, analysis);
+    choice.addEventListener("click", () => {
+      select.value = image.id;
+      choices.querySelectorAll(".existing-image-choice").forEach((item) => {
+        item.setAttribute("aria-pressed", String(item === choice));
+      });
+      updateDestination();
+    });
+    choices.append(choice);
   }
   if (images.some(image => image.id === selected)) select.value = selected;
   if (destination === "existing" && !images.length && !activeJobId) destination = null;
@@ -246,9 +269,11 @@ async function refreshUpdateStatus() {
     const worker = status.worker || {};
     const panel = $("update-panel");
     const button = $("update-button");
+    const checkButton = $("check-update-button");
     panel.hidden = false;
     button.hidden = !status.can_update || worker.state === "running";
     button.disabled = worker.state === "running";
+    checkButton.hidden = worker.state === "running";
     let targetCommit = sessionStorage.getItem(UPDATE_TARGET_KEY);
     if (!targetCommit && worker.state === "running" && status.latest_commit?.sha) {
       targetCommit = status.latest_commit.sha;
@@ -309,6 +334,7 @@ async function refreshUpdateStatus() {
     $("update-button").hidden = true;
     $("update-title").textContent = "Update-Status nicht verfügbar";
     $("update-detail").textContent = "KIBM versucht die Versionsprüfung erneut.";
+    $("check-update-button").hidden = false;
     scheduleUpdatePoll(10000);
   }
 }
@@ -384,6 +410,7 @@ function updateDestination() {
         ? "Das Image ist bereits kompakt oder bietet weniger als 256 MB geschätzten Shrink-Spielraum. Ein erneuter Shrink wird nicht angeboten."
         : "Das Dateisystem konnte nicht sicher geprüft werden. KIBM bietet deshalb keinen Shrink an.";
   $("delete-existing-image").disabled = !existingImage || running;
+  $("existing-image-choices").querySelectorAll(".existing-image-choice").forEach((choice) => { choice.disabled = running; });
   const minimumUsbBytes = requiredUsbCapacity(shrink);
   const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
   $("start-backup").disabled = !destination || !ready || running || !$("backup-confirm").checked
@@ -476,6 +503,21 @@ $("preflight").addEventListener("click", async () => {
     await loadUsbDevices();
     updateDestination();
   } catch (error) { $("preflight-message").textContent = error.message; }
+});
+
+$("check-update-button").addEventListener("click", async () => {
+  const button = $("check-update-button");
+  button.disabled = true;
+  button.textContent = "Prüfe GitHub …";
+  $("update-title").textContent = "GitHub-Version wird geprüft …";
+  $("update-detail").textContent = "KIBM fragt den aktuellen Stand von GitHub ab.";
+  window.clearTimeout(updatePoll);
+  try {
+    await refreshUpdateStatus();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Auf Update prüfen";
+  }
 });
 
 for (const target of ["pc", "usb", "existing"]) {

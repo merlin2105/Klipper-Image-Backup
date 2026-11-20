@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.2.2">
-  <script src="/static/app.js?v=0.2.2" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.2.3">
+  <script src="/static/app.js?v=0.2.3" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -32,7 +32,7 @@
 
         <section id="update-panel" class="update-panel panel" aria-live="polite" hidden>
           <div><strong id="update-title">GitHub-Version wird geprüft …</strong><p id="update-detail">KIBM fragt den aktuellen Stand von GitHub ab.</p></div>
-          <button id="update-button" class="secondary-button" type="button" hidden>Update installieren</button>
+          <div class="update-actions"><button id="check-update-button" class="secondary-button" type="button">Auf Update prüfen</button><button id="update-button" class="secondary-button" type="button" hidden>Update installieren</button></div>
         </section>
 
         <section class="section-head"><div><h2>Backup-Bereitschaft</h2></div><span class="section-note">DIAGNOSE</span></section>
@@ -67,7 +67,9 @@
             <p class="usb-format-note"><b>USB-Stick wird als exFAT formatiert.</b> Vorhandene Daten auf dem ausgewählten Stick werden gelöscht. exFAT ermöglicht die Nutzung unter Windows, macOS und Linux.</p>
           </div>
           <div id="existing-options" class="usb-options" hidden>
-            <div class="usb-select-row"><label for="existing-image">Image auf USB</label><select id="existing-image"><option value="">Image auswählen</option></select></div>
+            <p id="existing-images-label" class="existing-images-label">Gefundene Images auf dem USB-Stick</p>
+            <div id="existing-image-choices" class="existing-image-choices" role="group" aria-labelledby="existing-images-label"></div>
+            <select id="existing-image" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Image auswählen</option></select>
             <p id="existing-image-analysis" class="usb-format-note">KIBM prüft Dateisystem und Partitionsgrößen unabhängig vom Dateinamen.</p>
             <p class="usb-format-note">PiShrink erstellt eine verkleinerte Kopie auf demselben Stick. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.</p>
             <div class="existing-image-actions"><button id="delete-existing-image" class="secondary-button destructive-button" type="button">Ausgewähltes Image löschen</button><span>Nur die ausgewählte .img-Datei wird gelöscht.</span></div>
@@ -161,7 +163,7 @@
           </article>
         </section>
 
-        <footer class="footer"><span>KIBM <b>0.2.2</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
+        <footer class="footer"><span>KIBM <b>0.2.3</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
       </div>
     </main>
   </div>
