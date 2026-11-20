@@ -22,7 +22,7 @@ SESSION_TTL_SECONDS = 4 * 60 * 60
 sessions: dict[str, tuple[str, float]] = {}
 login_attempts: dict[str, list[float]] = {}
 usb_jobs: dict[str, tuple[str, str]] = {}
-app = FastAPI(title="Klipper Image Backup Manager", version="0.2.1b1", docs_url=None, redoc_url=None)
+app = FastAPI(title="Klipper Image Backup Manager", version="0.2.2b1", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 
@@ -44,6 +44,11 @@ class UsbBackupRequest(BaseModel):
 
 
 class UsbShrinkRequest(BaseModel):
+    image_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    confirmed: bool
+
+
+class UsbImageDeleteRequest(BaseModel):
     image_id: str = Field(pattern=r"^[a-f0-9]{64}$")
     confirmed: bool
 
@@ -219,6 +224,17 @@ def get_usb_images():
         return _media_request({"action": "images"})
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=503, detail="USB-Images können nicht gelesen werden.") from exc
+
+
+@app.post("/api/backup/usb/images/delete")
+def delete_usb_image(body: UsbImageDeleteRequest, request: Request, x_kibm_csrf: Optional[str] = Header(default=None, alias="X-KIBM-CSRF")):
+    _require_csrf(request, x_kibm_csrf)
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Bestätige zuerst das Löschen der ausgewählten Image-Datei.")
+    try:
+        return _media_request({"action": "delete_image", "image_id": body.image_id})
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc) or "USB-Image konnte nicht gelöscht werden.") from exc
 
 
 @app.get("/api/update")

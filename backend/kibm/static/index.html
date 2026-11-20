@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=update-progress">
-  <script src="/static/app.js?v=update-progress" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.2.2">
+  <script src="/static/app.js?v=0.2.2" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -44,30 +44,22 @@
             <button id="destination-pc" class="destination-card" type="button" aria-pressed="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v4m-4 0h8"/></svg>
               <span><strong>PC · Vollständiges Image</strong><small>Im Browser speichern</small></span>
+              <span class="destination-info" tabindex="0" role="img" aria-label="Information zur PC-Sicherung" data-tooltip="KIBM liest die gesamte System-microSD und überträgt ein vollständiges Image an deinen Browser. Der Browser fragt, wo die Datei gespeichert werden soll. Es wird nichts auf dem Pi oder einem USB-Stick gespeichert.">i</span>
             </button>
-            <button id="destination-usb" class="destination-card" type="button" aria-pressed="false" aria-describedby="usb-detection-title" disabled>
+            <button id="destination-usb" class="destination-card" type="button" aria-pressed="false" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="8" width="10" height="13" rx="2"/><path d="M9 8V3h6v5M11 5.5h.01m2 0h.01M11 17h2"/></svg>
               <span><strong>USB-Stick · Sicherung</strong><small>Direkt am Raspberry Pi speichern</small></span>
+              <span class="destination-info" tabindex="0" role="img" aria-label="Information zur USB-Sicherung" data-tooltip="Dieser Weg speichert das Karten-Image direkt auf einem am Raspberry Pi angeschlossenen USB-Stick. KIBM muss den Stick dafür formatieren; dabei werden alle vorhandenen Daten auf dem ausgewählten Stick gelöscht. Ohne erkannten Stick ist diese Auswahl deaktiviert.">i</span>
             </button>
             <button id="destination-existing" class="destination-card" type="button" aria-pressed="false" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8l3 3m0-3v3H8m8 5-3-3m0 3v-3h3"/></svg>
-              <span><strong>USB-Image prüfen</strong><small>Erst prüfen, dann bei Bedarf verkleinern</small></span>
+              <span><strong>Image auf USB-Stick</strong><small>Vorhandenes Image prüfen, verkleinern oder löschen</small></span>
+              <span class="destination-info" tabindex="0" role="img" aria-label="Information zum vorhandenen USB-Image" data-tooltip="Diese Auswahl erscheint nur, wenn KIBM auf dem USB-Stick eine .img-Datei findet. KIBM untersucht den Image-Inhalt unabhängig vom Dateinamen. Ein verkleinertes Image wird als kompakt erkannt. Du kannst eine verkleinerbare Datei bearbeiten oder die ausgewählte Image-Datei nach Bestätigung löschen.">i</span>
             </button>
           </div>
           <p id="pc-options" class="pc-options" hidden>Der Browser speichert das vollständige Image im gewünschten Ordner. Plane Platz für die gesamte microSD ein.</p>
-          <div id="usb-detection-status" class="usb-detection-status" role="status">
-            <span class="usb-detection-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="7" y="8" width="10" height="13" rx="2"/>
-                <path d="M9 8V3h6v5M11 5.5h.01m2 0h.01M11 17h2"/>
-              </svg>
-            </span>
-            <div>
-              <strong id="usb-detection-title">USB-Stick wird gesucht …</strong>
-              <p id="usb-detection-detail"></p>
-            </div>
-          </div>
           <div id="usb-options" class="usb-options" hidden>
+            <p id="usb-detection-detail" class="usb-detection-inline" role="status"></p>
             <div class="usb-select-row"><label for="usb-device">Erkannter USB-Stick</label><select id="usb-device"><option value="">USB-Stick auswählen</option></select><button id="refresh-usb" class="text-button" type="button">Erneut suchen</button></div>
             <label class="option-check"><input id="shrink-image" type="checkbox"><span><b>Image nach der vollständigen Sicherung mit PiShrink verkleinern</b><small>Der Shrink läuft auf dem Pi an der Image-Datei auf dem USB-Stick.</small></span></label>
             <label id="keep-full-row" class="option-check nested-option" hidden><input id="keep-full-image" type="checkbox"><span><b>Vollständiges Image zusätzlich behalten</b><small>Wenn nicht aktiviert, wird das Voll-Image erst nach erfolgreichem Shrink gelöscht.</small></span></label>
@@ -78,6 +70,7 @@
             <div class="usb-select-row"><label for="existing-image">Image auf USB</label><select id="existing-image"><option value="">Image auswählen</option></select></div>
             <p id="existing-image-analysis" class="usb-format-note">KIBM prüft Dateisystem und Partitionsgrößen unabhängig vom Dateinamen.</p>
             <p class="usb-format-note">PiShrink erstellt eine verkleinerte Kopie auf demselben Stick. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.</p>
+            <div class="existing-image-actions"><button id="delete-existing-image" class="secondary-button destructive-button" type="button">Ausgewähltes Image löschen</button><span>Nur die ausgewählte .img-Datei wird gelöscht.</span></div>
           </div>
           <div id="backup-confirmations" class="backup-confirmations" hidden>
             <label class="confirm-row"><input id="backup-confirm" type="checkbox"><span>Ich bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status erfolgt keine automatische Druckprüfung.</span></label>
@@ -168,7 +161,7 @@
           </article>
         </section>
 
-        <footer class="footer"><span>KIBM <b>0.2.1</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
+        <footer class="footer"><span>KIBM <b>0.2.2</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
       </div>
     </main>
   </div>

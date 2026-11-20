@@ -327,30 +327,16 @@ async function loadExistingImages() {
 }
 
 function renderUsbDetection() {
-  const status = $("usb-detection-status");
   const device = selectedUsbDevice();
-  let title = "Kein USB-Stick erkannt";
-  let detail = "Sobald du einen Stick am Pi einsteckst, erscheint er hier.";
-  let state = "";
+  let detail = "";
   if (usbDeviceSignature === "unavailable") {
-    title = "USB-Erkennung nicht erreichbar";
-    detail = "Die Erkennung wird automatisch erneut versucht.";
-    state = "unavailable";
+    detail = "USB-Erkennung nicht erreichbar. KIBM versucht es automatisch erneut.";
   } else if (device) {
-    title = `${device.model?.trim() || "USB-Stick"} ausgewählt`;
-    detail = `${device.path} · Vor der Sicherung ist eine Formatierung als exFAT nötig. Sie löscht die vorhandenen Daten.`;
-    state = "detected";
+    detail = `${device.model?.trim() || "USB-Stick"} · ${device.path} · ${formatBytes(device.size_bytes)}. Vor der Sicherung wird der Stick als exFAT formatiert; vorhandene Daten werden gelöscht.`;
   } else if (usbDevices.length) {
-    title = usbDevices.length === 1 ? "USB-Stick erkannt" : `${usbDevices.length} USB-Sticks erkannt`;
-    detail = isUsbDestination()
-      ? "Wähle den Stick in der Liste aus."
-      : "Wähle „USB-Stick · Sicherung“, um ein Image darauf zu speichern.";
-    state = "detected";
+    detail = `${usbDevices.length === 1 ? "USB-Stick erkannt" : `${usbDevices.length} USB-Sticks erkannt`}. Wähle den gewünschten Stick aus.`;
   }
-  status.dataset.state = state;
-  const heading = $("usb-detection-title");
   const description = $("usb-detection-detail");
-  if (heading.textContent !== title) heading.textContent = title;
   if (description.textContent !== detail) description.textContent = detail;
 }
 
@@ -397,6 +383,7 @@ function updateDestination() {
       : existingImage.shrinkability?.status === "already_compact"
         ? "Das Image ist bereits kompakt oder bietet weniger als 256 MB geschätzten Shrink-Spielraum. Ein erneuter Shrink wird nicht angeboten."
         : "Das Dateisystem konnte nicht sicher geprüft werden. KIBM bietet deshalb keinen Shrink an.";
+  $("delete-existing-image").disabled = !existingImage || running;
   const minimumUsbBytes = requiredUsbCapacity(shrink);
   const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
   $("start-backup").disabled = !destination || !ready || running || !$("backup-confirm").checked
@@ -505,6 +492,22 @@ for (const target of ["pc", "usb", "existing"]) {
 $("backup-confirm").addEventListener("change", updateDestination);
 $("format-confirm").addEventListener("change", updateDestination);
 $("existing-image").addEventListener("change", updateDestination);
+$("delete-existing-image").addEventListener("click", async () => {
+  const image = usbImages.find(item => item.id === $("existing-image").value);
+  if (!image) return;
+  if (!window.confirm(`Image-Datei wirklich löschen?\n\n${image.filename}\n${formatBytes(image.size_bytes)}\n\nNur diese .img-Datei wird entfernt. Dieser Schritt kann nicht rückgängig gemacht werden.`)) return;
+  const button = $("delete-existing-image");
+  button.disabled = true;
+  try {
+    await api("/api/backup/usb/images/delete", { method: "POST", body: JSON.stringify({ image_id: image.id, confirmed: true }) });
+    await loadExistingImages();
+    $("preflight-message").textContent = `Image „${image.filename}“ wurde vom USB-Stick gelöscht.`;
+  } catch (error) {
+    $("preflight-message").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 $("usb-device").addEventListener("change", () => {
   $("format-confirm").checked = false;
   renderUsbDetection();

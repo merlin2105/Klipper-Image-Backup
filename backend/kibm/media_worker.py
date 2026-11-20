@@ -558,6 +558,8 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._start(request)
             elif action == "shrink_existing":
                 self._start_existing(request)
+            elif action == "delete_image":
+                self._delete_image(request)
             elif action == "status":
                 self._status(request)
             elif action == "download":
@@ -612,6 +614,40 @@ class MediaHandler(socketserver.StreamRequestHandler):
             _job = job
         threading.Thread(target=_run_existing_shrink, args=(job, image), daemon=True).start()
         self._reply({"job": _job_data(job), "device": volume["device"]})
+
+    def _delete_image(self, request: dict[str, Any]) -> None:
+        _ensure_update_idle()
+        with _lock:
+            if _job and (_job.state in BUSY_STATES or _job.active_downloads):
+                raise ValueError("Warte, bis der laufende USB-Auftrag und alle Downloads abgeschlossen sind.")
+            image = _listed_images.get(request.get("image_id"))
+            if not image:
+                raise ValueError("Das Image ist nicht mehr in der aktuellen USB-Liste. Scanne den Stick erneut.")
+            filename = image.get("filename")
+            if not isinstance(filename, str) or Path(filename).name != filename or not filename.lower().endswith(".img"):
+                raise ValueError("Es kann nur eine einzelne .img-Datei gelöscht werden.")
+            expected = image["volume"]["identity"]
+            volume = next((item for item in _image_volumes() if item["identity"] == expected), None)
+            if volume is None:
+                raise ValueError("Der USB-Stick wurde gewechselt oder ist nicht mehr verfügbar.")
+            if not _mounted_volume(VOLUME_PATH, volume):
+                if VOLUME_PATH.is_mount():
+                    _run(["umount", "--", str(VOLUME_PATH)])
+                _mount_image_volume(volume, VOLUME_PATH, "rw")
+            if not any(item["identity"] == expected for item in _image_volumes()):
+                raise ValueError("Der USB-Stick wurde beim Einbinden gewechselt.")
+            source = VOLUME_PATH / filename
+            info = source.lstat()
+            if not stat.S_ISREG(info.st_mode) or _image_id(volume, source, info) != image["id"]:
+                raise ValueError("Die Image-Datei wurde seit der Auswahl verändert. Scanne den Stick erneut.")
+            source.unlink()
+            directory_fd = os.open(VOLUME_PATH, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            _listed_images.pop(image["id"], None)
+            self._reply({"deleted": filename})
 
     def _start(self, request: dict[str, Any]) -> None:
         global _job
