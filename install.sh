@@ -137,6 +137,7 @@ if [[ -d $rollback_venv && -f $install_dir/build-info.json ]]; then
   rollback_archive=$rollback_dir/previous-install.tar.gz
   rollback_targets=(
     etc/kibm/admin-user
+    etc/kibm/allowed_signers
     etc/kibm/tls.crt
     etc/kibm/tls.key
     etc/pam.d/kibm
@@ -148,6 +149,7 @@ if [[ -d $rollback_venv && -f $install_dir/build-info.json ]]; then
     etc/modules-load.d/kibm-loop.conf
     etc/klipper-image-backup-manager.env
     usr/local/sbin/kibm-admin
+    usr/local/sbin/kibm-fetch-release
     opt/klipper-image-backup-manager/backend
     opt/klipper-image-backup-manager/tools
     opt/klipper-image-backup-manager/pyproject.toml
@@ -201,7 +203,7 @@ restore_previous_install() {
 
 install_step="Systempakete installieren"
 missing_packages=()
-for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux mount udev kmod curl; do
+for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux mount udev kmod curl git openssh-client; do
   if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -q 'install ok installed'; then
     missing_packages+=("${package}")
   fi
@@ -233,6 +235,7 @@ install_step="Dienstkonto und Zugriffsrechte einrichten"
 install_dir=/opt/klipper-image-backup-manager
 install -d -o root -g root -m 0755 "$install_dir"
 install -o root -g root -m 0755 scripts/kibm-admin /usr/local/sbin/kibm-admin
+install -o root -g root -m 0755 scripts/kibm-fetch-release /usr/local/sbin/kibm-fetch-release
 sudoers_tmp=$(mktemp /etc/sudoers.d/kibm-admin.XXXXXX)
 printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/kibm-admin\n' "$admin_user" > "$sudoers_tmp"
 chmod 0440 "$sudoers_tmp"
@@ -260,6 +263,8 @@ install -d -o root -g kibm -m 0750 /etc/kibm
 printf '%s\n' "$admin_user" > /etc/kibm/admin-user
 chown root:root /etc/kibm/admin-user
 chmod 0644 /etc/kibm/admin-user
+# Release keys trusted by the updater; a signed release may replace them.
+install -o root -g root -m 0644 security/allowed_signers /etc/kibm/allowed_signers
 printf 'auth    include common-auth\naccount include common-account\n' > /etc/pam.d/kibm
 chmod 0644 /etc/pam.d/kibm
 install_step="HTTPS-Adresse und Zertifikat einrichten"

@@ -355,6 +355,8 @@
     "Warte, bis das USB-Image fertig ist und alle Downloads abgeschlossen sind.": "Wait until the USB image and all downloads are finished.",
     "Bitte den USB-Stick vor dem Update sicher auswerfen.": "Safely eject the USB drive before updating.",
     "Ein Update läuft bereits.": "An update is already running.",
+    "USB-Auftrag gefunden": "USB job found",
+    "Auf GitHub ist noch kein Release-Tag vorhanden.": "There is no release tag on GitHub yet.",
     "Die bestätigte Update-Version ist ungültig.": "The confirmed update version is invalid.",
     "Der Download wurde nicht rechtzeitig gestartet. Bitte das Image erneut anfordern.": "The download was not started in time. Please request the image again.",
   };

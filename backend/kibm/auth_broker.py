@@ -32,6 +32,9 @@ class AuthHandler(socketserver.StreamRequestHandler):
             return
         try:
             payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                self._reply(False)
+                return
             if payload.get("action") == "health":
                 username = ADMIN_USER_PATH.read_text(encoding="utf-8").strip()
                 pwd.getpwnam(username)

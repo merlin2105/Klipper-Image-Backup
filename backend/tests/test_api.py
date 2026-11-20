@@ -251,3 +251,58 @@ def test_update_start_passes_the_confirmed_commit_to_the_worker(monkeypatch) -> 
         )
     assert response.status_code == 200
     assert sent[-1] == {"action": "update_start", "commit": confirmed_sha}
+
+
+def _logged_in_client(monkeypatch) -> tuple[TestClient, str]:
+    monkeypatch.setattr(main, "_authenticate_pi_password", lambda _password: True)
+    monkeypatch.setattr(main, "login_attempts", {})
+    logged_in = TestClient(app)
+    csrf = logged_in.post(
+        "/api/login", json={"password": "existing-password"}, headers={"Origin": "http://testserver"}
+    ).json()["csrf_token"]
+    return logged_in, csrf
+
+
+def test_login_purges_expired_sessions_and_orphaned_usb_jobs(monkeypatch) -> None:
+    monkeypatch.setattr(main, "sessions", {"expired": ("csrf", 1.0)})
+    monkeypatch.setattr(main, "usb_jobs", {"old-job": {"expired": "token"}})
+    _logged_in_client(monkeypatch)
+    assert "expired" not in main.sessions
+    assert "old-job" not in main.usb_jobs
+
+
+def test_usb_job_can_be_resumed_by_a_new_session(monkeypatch) -> None:
+    job = {"job_id": "job-1", "state": "sichern", "message": "läuft", "files": [], "error": None}
+    monkeypatch.setattr(main, "sessions", {})
+    monkeypatch.setattr(main, "usb_jobs", {})
+    monkeypatch.setattr(main, "_media_request", lambda payload: (
+        {"job": job} if payload["action"] in {"current", "status"} else {}
+    ))
+    first, _ = _logged_in_client(monkeypatch)
+    second, _ = _logged_in_client(monkeypatch)
+
+    resumed = first.get("/api/backup/usb/current").json()["job"]
+    again = second.get("/api/backup/usb/current").json()["job"]
+
+    assert resumed["job_id"] == "job-1"
+    assert resumed["download_token"] != again["download_token"]
+    assert first.get("/api/backup/usb/current").json()["job"]["download_token"] == resumed["download_token"]
+    assert first.get("/api/backup/usb/jobs/job-1").status_code == 200
+    assert second.get("/api/backup/usb/jobs/job-1").status_code == 200
+    assert TestClient(app).get("/api/backup/usb/current").status_code == 401
+
+
+def test_usb_current_reports_no_job(monkeypatch) -> None:
+    monkeypatch.setattr(main, "_media_request", lambda _payload: {"job": None})
+    logged_in, _ = _logged_in_client(monkeypatch)
+    assert logged_in.get("/api/backup/usb/current").json() == {"job": None}
+
+
+def test_usb_download_requires_the_token_of_the_own_session(monkeypatch) -> None:
+    monkeypatch.setattr(main, "sessions", {})
+    monkeypatch.setattr(main, "usb_jobs", {})
+    first, _ = _logged_in_client(monkeypatch)
+    second, _ = _logged_in_client(monkeypatch)
+    first_session = first.cookies.get("kibm_session")
+    main.usb_jobs["job-1"] = {first_session: "first-token"}
+    assert second.get("/api/backup/usb/download/job-1/a.img?token=first-token").status_code == 404

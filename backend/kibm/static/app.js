@@ -118,6 +118,7 @@ async function loadDashboard() {
     renderPrinter(printer);
     renderStorage(storage);
     renderReadiness(currentReadiness);
+    if (session.authenticated) await resumeUsbJob();
     await loadUsbDevices();
     updateDestination();
     refreshUpdateStatus();
@@ -910,6 +911,28 @@ function showMeasuredProgress(bytes, total) {
   const percent = total ? Math.min(100, bytes / total * 100) : 0;
   $("backup-progress-bar").value = percent;
   $("backup-progress-value").textContent = `${Math.floor(percent)} %`;
+}
+
+let usbJobResumeChecked = false;
+async function resumeUsbJob() {
+  // After a reload or service restart, pick up the media worker's job again once.
+  if (usbJobResumeChecked || activeJobId || usbJobId) return;
+  usbJobResumeChecked = true;
+  try {
+    const { job } = await api("/api/backup/usb/current");
+    if (!job) return;
+    activeJobType = "usb";
+    activeDownloadToken = job.download_token;
+    usbJobId = job.job_id;
+    activeJobId = job.job_id;
+    $("backup-progress").hidden = false;
+    $("backup-download").hidden = true;
+    $("backup-progress-title").textContent = "USB-Auftrag gefunden";
+    $("backup-progress-detail").textContent = job.error || job.message;
+    pollTransfer();
+  } catch {
+    // The dashboard stays usable without the resume check.
+  }
 }
 
 async function pollUsbJob() {

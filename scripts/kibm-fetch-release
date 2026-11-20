@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Verwendung: kibm-fetch-release <Repository-URL> <allowed_signers-Datei> <Zielverzeichnis>
+#
+# Holt den neuesten Release-Tag (vX.Y.Z oder vX.Y.ZbN), prüft seine SSH-Signatur
+# gegen die hinterlegten Schlüssel und entpackt den signierten Stand in das
+# Zielverzeichnis. Gibt bei Erfolg "<Tag> <Commit>" aus.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+# Keine Git-Konfiguration des aufrufenden Kontos verwenden.
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0
+
+[[ $# -eq 3 ]] || { echo "Verwendung: kibm-fetch-release <Repository-URL> <allowed_signers> <Zielverzeichnis>" >&2; exit 2; }
+repository=$1
+signers=$2
+output=$3
+[[ -s $signers ]] || { echo "Kein vertrauenswürdiger Release-Schlüssel hinterlegt ($signers)." >&2; exit 1; }
+
+tag=$(git ls-remote --tags --refs "$repository" 'v*' | python3 -c '
+import re
+import sys
+
+best = None
+for line in sys.stdin:
+    fields = line.split()
+    name = fields[1][len("refs/tags/"):] if len(fields) == 2 and fields[1].startswith("refs/tags/") else ""
+    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)(?:b(\d+))?", name)
+    if match:
+        major, minor, patch, beta = match.groups()
+        key = (int(major), int(minor), int(patch), int(beta) if beta else float("inf"))
+        if best is None or key > best[0]:
+            best = (key, name)
+print(best[1] if best else "")
+')
+[[ -n $tag ]] || { echo "Auf GitHub ist noch kein Release-Tag vorhanden." >&2; exit 1; }
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+git init -q "$work/repo"
+git -C "$work/repo" fetch -q --depth 1 --no-tags "$repository" "refs/tags/$tag:refs/tags/$tag"
+if [[ $(git -C "$work/repo" cat-file -t "refs/tags/$tag") != tag ]] \
+  || ! git -C "$work/repo" cat-file tag "refs/tags/$tag" | grep -qx -- '-----BEGIN SSH SIGNATURE-----' \
+  || ! git -C "$work/repo" -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$signers" verify-tag "refs/tags/$tag" >/dev/null 2>&1; then
+  echo "Die Signatur des Release-Tags $tag ist ungültig oder stammt nicht vom hinterlegten Schlüssel." >&2
+  exit 1
+fi
+commit=$(git -C "$work/repo" rev-parse "refs/tags/$tag^{commit}")
+[[ $commit =~ ^[0-9a-f]{40}$ ]] || { echo "Der Release-Tag $tag zeigt auf keinen gültigen Commit." >&2; exit 1; }
+
+mkdir -p -- "$output"
+git -C "$work/repo" archive --format=tar "$commit" | tar -x -C "$output"
+version=$(python3 - "$output/pyproject.toml" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r'(?ms)^\[project\]\s.*?^version\s*=\s*["\']([^"\']+)["\']', text)
+print(match.group(1) if match else "")
+PY
+)
+if [[ "v$version" != "$tag" ]]; then
+  echo "Release-Tag $tag passt nicht zur Version ${version:-unbekannt} in pyproject.toml." >&2
+  exit 1
+fi
+printf '%s %s\n' "$tag" "$commit"

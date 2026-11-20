@@ -42,32 +42,29 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
     [[ -n "$operator" && "$operator" != root ]] || { echo "Pi-Benutzer konnte nicht erkannt werden." >&2; exit 1; }
     workdir=$(/usr/bin/mktemp -d /tmp/kibm-admin-update.XXXXXX)
     trap '/usr/bin/rm -rf -- "$workdir"' EXIT
-    latest=$(/usr/bin/curl --fail --location --silent --show-error --connect-timeout 10 --max-time 30 \
-      https://api.github.com/repos/merlin2105/Klipper-Image-Backup/commits/main \
-      | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
-    [[ $latest =~ ^[0-9a-f]{40}$ ]] || { echo "GitHub hat keine gültige Commit-ID geliefert." >&2; exit 1; }
+    confirmed=
     if [[ -f /run/kibm-media/update-commit ]]; then
       confirmed=$(/usr/bin/cat /run/kibm-media/update-commit)
       /usr/bin/rm -f -- /run/kibm-media/update-commit
       [[ $confirmed =~ ^[0-9a-f]{40}$ ]] || { echo "Die bestätigte Update-Version ist ungültig." >&2; exit 1; }
-      if [[ $confirmed != "$latest" ]]; then
-        echo "GitHub-Stand hat sich seit der Bestätigung geändert (bestätigt $confirmed, aktuell $latest). Bitte im Dashboard erneut auf Update prüfen." >&2
-        exit 1
-      fi
+    fi
+    # Only releases tagged and signed with a key from /etc/kibm/allowed_signers are installed.
+    release=$(/usr/local/sbin/kibm-fetch-release https://github.com/merlin2105/Klipper-Image-Backup.git \
+      /etc/kibm/allowed_signers "$workdir/source")
+    read -r tag latest <<< "$release"
+    [[ $latest =~ ^[0-9a-f]{40}$ ]] || { echo "Das signierte Release lieferte keine gültige Commit-ID." >&2; exit 1; }
+    if [[ -n $confirmed && $confirmed != "$latest" ]]; then
+      echo "Das neueste signierte Release hat sich seit der Bestätigung geändert (bestätigt $confirmed, aktuell $tag $latest). Bitte im Dashboard erneut auf Update prüfen." >&2
+      exit 1
     fi
     current=$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("commit", ""))' \
       /opt/klipper-image-backup-manager/build-info.json 2>/dev/null || true)
     dirty=$(/usr/bin/python3 -c 'import json,sys; print(str(bool(json.load(open(sys.argv[1])).get("dirty", False))).lower())' \
       /opt/klipper-image-backup-manager/build-info.json 2>/dev/null || true)
     if [[ $current == "$latest" && $dirty != true ]]; then
-      echo "KIBM ist bereits auf dem aktuellen GitHub-Stand ($latest)."
+      echo "KIBM ist bereits auf dem neuesten signierten Release ($tag)."
       exit 0
     fi
-    /usr/bin/curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120 \
-      "https://codeload.github.com/merlin2105/Klipper-Image-Backup/tar.gz/$latest" \
-      --output "$workdir/source.tar.gz"
-    /usr/bin/mkdir "$workdir/source"
-    /usr/bin/tar --extract --gzip --file "$workdir/source.tar.gz" --strip-components=1 --directory "$workdir/source"
     /usr/bin/printf '%s\n' "$latest" > "$workdir/source/BUILD_COMMIT"
     cd "$workdir/source"
     SUDO_USER="$operator" KIBM_SOURCE_COMMIT="$latest" KIBM_INSTALL_CONFIRM=1 /usr/bin/bash ./install.sh

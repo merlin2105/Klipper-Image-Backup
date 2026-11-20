@@ -11,10 +11,11 @@ System diagnosis is available without login on the trusted local network. Image 
 | `GET` | `/api/backup/preflight` | Read-only checks for active print state, supported card layout, and read access |
 | `GET` | `/api/backup/usb/images` | Lists USB images with read-only shrinkability estimates |
 | `GET` | `/api/session` | Reports whether the browser session is authenticated |
-| `GET` | `/api/update` | Compares the installed commit with GitHub `main` and reports updater state |
+| `GET` | `/api/update` | Compares the installed version with the newest GitHub release tag and reports updater state (`?refresh=true` is honoured at most every two minutes) |
 | `POST` | `/api/login` | Validates the existing Pi account password through the local auth broker |
 | `POST` | `/api/logout` | Ends the authenticated session (CSRF-protected) |
-| `POST` | `/api/update` | Starts a confirmed GitHub update (authenticated and CSRF-protected) |
+| `POST` | `/api/update` | Starts a confirmed update to that release; the signature is verified before installing (authenticated and CSRF-protected) |
+| `GET` | `/api/backup/usb/current` | Returns the media worker's current USB job with a download token for this session, so a reloaded page can resume it (authenticated) |
 | `POST` | `/api/backup/start` | Starts a confirmed full-card image job (authenticated and CSRF-protected) |
 | `GET` | `/api/backup/jobs/{job_id}` | Returns authenticated transfer progress and SHA-256 |
 | `GET` | `/api/backup/download/{job_id}?token=…` | Streams the complete raw card image to the browser (authenticated, one use) |

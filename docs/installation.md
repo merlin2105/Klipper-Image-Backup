@@ -14,7 +14,7 @@ After installation, open `https://<printer-ip>:8765` from a browser on the trust
 
 The dashboard diagnosis is available on the LAN. Image creation and download require a session authenticated with the existing Pi account password. Do not expose port 8765 to the internet.
 
-When GitHub `main` has a newer commit, the dashboard offers an update button. Updating requires the existing Pi account session and a separate confirmation. KIBM downloads that exact commit and runs the regular installer in a dedicated systemd unit; its web page is briefly unavailable while the services restart. The Pi must be able to reach GitHub over HTTPS.
+When GitHub has a newer signed release tag, the dashboard offers an update button. Updating requires the existing Pi account session and a separate confirmation. KIBM downloads that exact release, verifies its SSH signature against `/etc/kibm/allowed_signers`, and runs the regular installer in a dedicated systemd unit; its web page is briefly unavailable while the services restart. The Pi must be able to reach GitHub over HTTPS.
 
 Installations predating the dashboard updater need one initial update over SSH with `sudo kibm-admin update`.
 

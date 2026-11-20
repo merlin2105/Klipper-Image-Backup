@@ -99,7 +99,7 @@ Das Dashboard prüft GitHub auf eine neuere KIBM-Version und zeigt installierte 
 
 Während der Installation zeigt KIBM ein blockierendes Fortschrittsfenster. Lass den Raspberry Pi eingeschaltet und starte keine Sicherung, bis der Vorgang abgeschlossen ist. Danach meldet KIBM den Erfolg und bietet **Seite neu laden** an. Vor einem Update muss ein angeschlossener USB-Datenträger sicher ausgeworfen sein; ein laufender Sicherungsauftrag blockiert das Update ebenfalls.
 
-Der Updater lädt den bestätigten GitHub-Commit und führt den KIBM-Installer aus. Dafür muss der Pi GitHub über HTTPS erreichen können. Ein abgebrochener oder fehlgeschlagener Vorgang lässt sich über die unten genannten Administrationsbefehle untersuchen.
+Updates kommen ausschließlich von signierten Release-Tags (zum Beispiel `v0.3.0`), nicht vom aktuellen Stand von `main`. Der Updater lädt das bestätigte Release, prüft dessen SSH-Signatur gegen den bei der Installation hinterlegten Release-Schlüssel und führt erst dann den KIBM-Installer aus. Ein unsignierter oder fremd signierter Tag wird nicht installiert. Dafür muss der Pi GitHub über HTTPS erreichen können. Wie ein Release erstellt wird, steht in [Release erstellen](docs/release.md). Ein abgebrochener oder fehlgeschlagener Vorgang lässt sich über die unten genannten Administrationsbefehle untersuchen.
 
 Vor einem Update sichert der Installer die zuletzt installierte KIBM-Version einschließlich ihrer Dienstkonfiguration. Wenn die neue Version die Bereitschaftsprüfung nicht besteht, stellt KIBM die vorherigen Dateien und die vorherige Python-Umgebung automatisch wieder her und prüft den Start erneut. Das Update wird dabei als fehlgeschlagen gemeldet; die Sicherung enthält keine USB-Images oder sonstigen Nutzerdaten.
 
@@ -127,7 +127,7 @@ sudo kibm-admin restart
 sudo kibm-admin update
 ```
 
-`status`, `logs` und `usb` zeigen den Zustand bzw. Diagnoseinformationen. `restart` startet die KIBM-Dienste neu. `update` startet den GitHub-Updater. Der Wrapper akzeptiert keine beliebigen Shell-Befehle.
+`status`, `logs` und `usb` zeigen den Zustand bzw. Diagnoseinformationen. `restart` startet die KIBM-Dienste neu. `update` installiert das neueste signierte Release von GitHub. Der Wrapper akzeptiert keine beliebigen Shell-Befehle.
 
 ## Fehlerbehebung und Administration
 

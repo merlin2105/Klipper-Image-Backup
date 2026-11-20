@@ -62,6 +62,13 @@ class MediaJob:
 
 
 _lock = threading.RLock()
+# Serialises USB scans against jobs that mount or change the stick. Always
+# taken before _lock, so status requests (only _lock) never wait for a scan.
+_scan_lock = threading.Lock()
+# Bumped whenever KIBM itself changes files on a stick; together with the
+# volume identities it decides whether the cached image list is still valid.
+_images_generation = 0
+_images_cache: Optional[tuple[Any, list[dict[str, Any]]]] = None
 _job: Optional[MediaJob] = None
 _worker_uid: Optional[int] = None
 _worker_gid: Optional[int] = None
@@ -259,9 +266,9 @@ def _mount_image_volume(volume: dict[str, Any], target: Path, mode: str) -> None
         raise ValueError("Der USB-Stick wurde gewechselt.")
 
 
-def _existing_images() -> list[dict[str, Any]]:
+def _existing_images(volumes: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
     images = []
-    for volume in _image_volumes():
+    for volume in _image_volumes() if volumes is None else volumes:
         try:
             already_mounted = _mounted_volume(VOLUME_PATH, volume)
             directory = VOLUME_PATH if already_mounted else SCAN_PATH
@@ -335,7 +342,7 @@ def _format_usb(device: dict[str, Any]) -> None:
         raise OSError("Die neue USB-Partition wurde nach dem Formatieren nicht erkannt.")
     _run(["mkfs.exfat", "-n", "KIBM", partition], timeout=120)
     VOLUME_PATH.mkdir(parents=True, exist_ok=True)
-    _run(["mount", "-t", "exfat", "-o", "rw", partition, str(VOLUME_PATH)])
+    _run(["mount", "-t", "exfat", "-o", "rw,nosuid,nodev,noexec", partition, str(VOLUME_PATH)])
 
 
 def _hash_file(path: Path, on_read: Optional[Callable[[int], None]] = None) -> str:
@@ -367,7 +374,15 @@ def _check_usb_capacity(device: dict[str, Any], image_size: int, shrink: bool) -
         )
 
 
+def _invalidate_images() -> None:
+    global _images_generation
+    with _lock:
+        _images_generation += 1
+
+
 def _set_job(**values: Any) -> None:
+    if "state" in values:
+        _invalidate_images()
     with _lock:
         if _job:
             for key, value in values.items():
@@ -552,6 +567,9 @@ class MediaHandler(socketserver.StreamRequestHandler):
         action = "unknown"
         try:
             request = json.loads(raw)
+            if not isinstance(request, dict):
+                self._reply({"error": "invalid_request"})
+                return
             action = request.get("action")
             if action == "devices":
                 self._reply({"devices": _devices()})
@@ -565,6 +583,9 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._delete_image(request)
             elif action == "status":
                 self._status(request)
+            elif action == "current":
+                with _lock:
+                    self._reply({"job": _job_data(_job) if _job else None})
             elif action == "download":
                 self._download(request)
             elif action == "eject":
@@ -586,13 +607,25 @@ class MediaHandler(socketserver.StreamRequestHandler):
             self._reply({"error": detail})
 
     def _list_images(self) -> None:
-        with _lock:
-            if _job and _job.state in BUSY_STATES:
-                self._reply({"images": []})
-                return
-            images = _existing_images()
-            _listed_images.clear()
-            _listed_images.update((item["id"], item) for item in images)
+        global _images_cache
+        with _scan_lock:
+            with _lock:
+                if _job and _job.state in BUSY_STATES:
+                    self._reply({"images": []})
+                    return
+                generation = _images_generation
+            volumes = _image_volumes()
+            key = (tuple(sorted(map(json.dumps, (volume["identity"] for volume in volumes)))), generation)
+            if _images_cache and _images_cache[0] == key:
+                images = _images_cache[1]
+            else:
+                # Mounting and reading the stick is slow; only rescan when a
+                # stick changed or KIBM wrote to it since the last scan.
+                images = _existing_images(volumes)
+                _images_cache = (key, images)
+            with _lock:
+                _listed_images.clear()
+                _listed_images.update((item["id"], item) for item in images)
             self._reply({"images": [
                 {key: value for key, value in item.items() if key != "volume"} for item in images
             ]})
@@ -600,7 +633,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
     def _start_existing(self, request: dict[str, Any]) -> None:
         global _job
         _ensure_update_idle()
-        with _lock:
+        with _scan_lock, _lock:
             if _job and (_job.state in BUSY_STATES or _job.active_downloads):
                 raise ValueError("Auf dem USB-Stick läuft bereits ein Auftrag oder Download.")
             image = _listed_images.get(request.get("image_id"))
@@ -620,7 +653,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
 
     def _delete_image(self, request: dict[str, Any]) -> None:
         _ensure_update_idle()
-        with _lock:
+        with _scan_lock, _lock:
             if _job and (_job.state in BUSY_STATES or _job.active_downloads):
                 raise ValueError("Warte, bis der laufende USB-Auftrag und alle Downloads abgeschlossen sind.")
             image = _listed_images.get(request.get("image_id"))
@@ -644,6 +677,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
             if not stat.S_ISREG(info.st_mode) or _image_id(volume, source, info) != image["id"]:
                 raise ValueError("Die Image-Datei wurde seit der Auswahl verändert. Scanne den Stick erneut.")
             source.unlink()
+            _invalidate_images()
             directory_fd = os.open(VOLUME_PATH, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(directory_fd)
@@ -673,10 +707,11 @@ class MediaHandler(socketserver.StreamRequestHandler):
             image_size=image_size, source_device=SOURCE_DEVICE, shrink=shrink, keep_full=keep_full,
             verify_image=request.get("verify_image", True) is not False,
         )
-        with _lock:
+        with _scan_lock, _lock:
             if _job and (_job.state in BUSY_STATES or _job.active_downloads):
                 raise ValueError("Auf dem USB-Stick läuft bereits ein Auftrag oder Download.")
             _job = job
+        _invalidate_images()
         threading.Thread(target=_run_job, args=(job, device, socket.gethostname()), daemon=True).start()
         self._reply({"job": _job_data(job), "device": device})
 
@@ -719,7 +754,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
 
     def _eject(self, request: dict[str, Any]) -> None:
         _ensure_update_idle()
-        with _lock:
+        with _scan_lock, _lock:
             if _job and _job.state in BUSY_STATES:
                 raise ValueError("Der USB-Stick kann während eines laufenden Auftrags nicht ausgeworfen werden.")
             if _job and _job.active_downloads:

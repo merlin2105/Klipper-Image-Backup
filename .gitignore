@@ -5,3 +5,4 @@ __pycache__/
 *.egg-info/
 .playwright-mcp/
 /.impeccable/review/*.png
+/.impeccable/mocks/

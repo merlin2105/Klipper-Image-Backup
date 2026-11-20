@@ -99,7 +99,7 @@ The dashboard checks GitHub for a newer KIBM version and displays the installed 
 
 During installation, KIBM shows a blocking progress dialog. Keep the Raspberry Pi powered on and do not start a backup until the update has finished. KIBM then reports success and offers **Reload page**. Safely eject any connected USB drive before updating; an active backup job also blocks the update.
 
-The updater downloads the confirmed GitHub commit and runs the KIBM installer. The Pi needs outbound HTTPS access to GitHub. You can investigate an interrupted or failed update with the administration commands below.
+Updates come only from signed release tags (for example `v0.3.0`), never from the current state of `main`. The updater downloads the confirmed release, verifies its SSH signature against the release key stored during installation, and only then runs the KIBM installer. An unsigned tag or one signed by another key is not installed. The Pi needs outbound HTTPS access to GitHub. See [Creating a release](docs/release.md) for how to publish one. You can investigate an interrupted or failed update with the administration commands below.
 
 Before updating, the installer snapshots the last installed KIBM version and its service configuration. If the new version fails its readiness check, KIBM automatically restores the previous files and Python environment, then checks that version again. The update is still reported as failed; the snapshot does not contain USB images or other user data.
 
@@ -127,7 +127,7 @@ sudo kibm-admin restart
 sudo kibm-admin update
 ```
 
-`status`, `logs`, and `usb` show service status or diagnostic information. `restart` restarts KIBM services. `update` starts the GitHub updater. The wrapper does not accept arbitrary shell commands.
+`status`, `logs`, and `usb` show service status or diagnostic information. `restart` restarts KIBM services. `update` installs the newest signed release from GitHub. The wrapper does not accept arbitrary shell commands.
 
 ## Troubleshooting and administration
 

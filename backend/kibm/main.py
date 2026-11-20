@@ -6,6 +6,7 @@ import secrets
 import socket
 import threading
 import time
+from importlib import metadata
 from pathlib import Path
 from typing import Optional
 
@@ -23,8 +24,15 @@ SESSION_TTL_SECONDS = 4 * 60 * 60
 sessions: dict[str, tuple[str, float]] = {}
 login_attempts: dict[str, list[float]] = {}
 login_lock = threading.Lock()
-usb_jobs: dict[str, tuple[str, str]] = {}
-app = FastAPI(title="Klipper Image Backup Manager", version="0.2.10b1", docs_url=None, redoc_url=None)
+# job_id -> {session_id: download_token}; several browser sessions may follow
+# the single USB job of the media worker.
+usb_jobs: dict[str, dict[str, str]] = {}
+MAX_USB_JOBS = 20
+try:
+    VERSION = metadata.version("klipper-image-backup-manager")
+except metadata.PackageNotFoundError:
+    VERSION = "0+unknown"
+app = FastAPI(title="Klipper Image Backup Manager", version=VERSION, docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 
@@ -66,6 +74,30 @@ def _session(request: Request) -> tuple[str, str]:
         sessions.pop(cookie, None)
         raise HTTPException(status_code=401, detail="Bitte mit dem bestehenden Pi-Konto anmelden.")
     return cookie, entry[0]
+
+
+def _purge_state() -> None:
+    now = time.time()
+    for session_id, (_, expires) in list(sessions.items()):
+        if expires < now:
+            sessions.pop(session_id, None)
+    with login_lock:
+        for address, stamps in list(login_attempts.items()):
+            if not any(stamp > now - 600 for stamp in stamps):
+                login_attempts.pop(address, None)
+    for job_id, owners in list(usb_jobs.items()):
+        for session_id in list(owners):
+            if session_id not in sessions:
+                owners.pop(session_id, None)
+        if not owners:
+            usb_jobs.pop(job_id, None)
+    for job_id in list(usb_jobs)[:-MAX_USB_JOBS]:
+        usb_jobs.pop(job_id, None)
+
+
+def _usb_token(job_id: str, session_id: str) -> str:
+    owners = usb_jobs.setdefault(job_id, {})
+    return owners.setdefault(session_id, secrets.token_urlsafe(32))
 
 
 def _require_csrf(request: Request, csrf_header: Optional[str]) -> tuple[str, str]:
@@ -311,6 +343,7 @@ def login(body: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Das Passwort des Pi-Kontos ist falsch.")
     with login_lock:
         login_attempts.pop(client_address, None)
+    _purge_state()
     session_id = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
     sessions[session_id] = (csrf, time.time() + SESSION_TTL_SECONDS)
@@ -418,8 +451,8 @@ def _start_media_job(session_id: str, payload: dict) -> dict:
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc) or "USB-Image konnte nicht gestartet werden.") from exc
     job = result["job"]
-    token = secrets.token_urlsafe(32)
-    usb_jobs[job["job_id"]] = (session_id, token)
+    _purge_state()
+    token = _usb_token(job["job_id"], session_id)
     return {
         **job,
         "download_token": token,
@@ -427,11 +460,24 @@ def _start_media_job(session_id: str, payload: dict) -> dict:
     }
 
 
+@app.get("/api/backup/usb/current")
+def current_usb_job(request: Request):
+    """Lets a reloaded page or a restarted web service find the worker's job again."""
+    session_id, _ = _session(request)
+    try:
+        job = _media_request({"action": "current"}).get("job")
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="USB-Auftragsstatus ist nicht erreichbar.") from exc
+    if not job:
+        return {"job": None}
+    _purge_state()
+    return {"job": {**job, "download_token": _usb_token(job["job_id"], session_id)}}
+
+
 @app.get("/api/backup/usb/jobs/{job_id}")
 def usb_backup_status(job_id: str, request: Request):
     session_id, _ = _session(request)
-    owner = usb_jobs.get(job_id)
-    if not owner or not hmac.compare_digest(owner[0], session_id):
+    if session_id not in usb_jobs.get(job_id, {}):
         raise HTTPException(status_code=404, detail="USB-Auftrag nicht gefunden.")
     try:
         result = _media_request({"action": "status", "job_id": job_id})
@@ -443,8 +489,8 @@ def usb_backup_status(job_id: str, request: Request):
 @app.get("/api/backup/usb/download/{job_id}/{filename}")
 def download_usb_image(job_id: str, filename: str, request: Request, token: str):
     session_id, _ = _session(request)
-    owner = usb_jobs.get(job_id)
-    if not owner or not hmac.compare_digest(owner[0], session_id) or not hmac.compare_digest(owner[1], token):
+    expected_token = usb_jobs.get(job_id, {}).get(session_id)
+    if not expected_token or not hmac.compare_digest(expected_token, token):
         raise HTTPException(status_code=404, detail="USB-Image-Download nicht gefunden.")
     try:
         status = _media_request({"action": "status", "job_id": job_id})["job"]
