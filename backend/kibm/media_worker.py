@@ -713,7 +713,6 @@ class MediaHandler(socketserver.StreamRequestHandler):
         status = _run(["systemctl", "show", "kibm-update.service", "--property=ActiveState", "--value"], timeout=10).stdout.strip()
         if status in {"active", "activating", "deactivating"}:
             raise ValueError("Ein Update läuft bereits.")
-        _run(["systemctl", "reset-failed", "kibm-update.service"], timeout=10)
         _run(["systemctl", "start", "--no-block", "kibm-update.service"], timeout=10)
         self._reply({"state": "running"})
 
