@@ -101,6 +101,8 @@ During installation, KIBM shows a blocking progress dialog. Keep the Raspberry P
 
 The updater downloads the confirmed GitHub commit and runs the KIBM installer. The Pi needs outbound HTTPS access to GitHub. You can investigate an interrupted or failed update with the administration commands below.
 
+Before updating, the installer snapshots the last installed KIBM version and its service configuration. If the new version fails its readiness check, KIBM automatically restores the previous files and Python environment, then checks that version again. The update is still reported as failed; the snapshot does not contain USB images or other user data.
+
 ## Safety and backup notes
 
 - **System card:** KIBM reads the source device `/dev/mmcblk0`; the normal backup workflow does not write to the running system microSD.

@@ -101,6 +101,8 @@ Während der Installation zeigt KIBM ein blockierendes Fortschrittsfenster. Lass
 
 Der Updater lädt den bestätigten GitHub-Commit und führt den KIBM-Installer aus. Dafür muss der Pi GitHub über HTTPS erreichen können. Ein abgebrochener oder fehlgeschlagener Vorgang lässt sich über die unten genannten Administrationsbefehle untersuchen.
 
+Vor einem Update sichert der Installer die zuletzt installierte KIBM-Version einschließlich ihrer Dienstkonfiguration. Wenn die neue Version die Bereitschaftsprüfung nicht besteht, stellt KIBM die vorherigen Dateien und die vorherige Python-Umgebung automatisch wieder her und prüft den Start erneut. Das Update wird dabei als fehlgeschlagen gemeldet; die Sicherung enthält keine USB-Images oder sonstigen Nutzerdaten.
+
 ## Sicherheits- und Backup-Hinweise
 
 - **Systemkarte:** KIBM liest das Quellgerät `/dev/mmcblk0`; die normale Sicherungsfunktion schreibt nicht auf die laufende System-microSD.

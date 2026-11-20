@@ -30,6 +30,7 @@ if [[ ! -f pyproject.toml || ! -d backend/kibm ]]; then
   echo "Bitte install.sh aus dem Repository-Verzeichnis starten." >&2
   exit 1
 fi
+install_dir=/opt/klipper-image-backup-manager
 model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)
 if [[ ${model} != *"Raspberry Pi 4"* ]]; then
   echo "Nicht unterstützte Hardware: ${model:-Raspberry-Pi-Modell nicht erkannt}. Dieser frühe Installer ist auf Raspberry Pi 4 begrenzt." >&2
@@ -56,12 +57,67 @@ fi
 [[ ${answer,,} == j || ${answer,,} == ja ]] || { echo "Abgebrochen."; exit 0; }
 install_step="Voraussetzungen prüfen"
 units=(kibm-auth.service kibm-media.service kibm.service)
+staged_venv=
+rollback_dir=
+rollback_archive=
+rollback_venv=
+rollback_snapshot_ready=false
+keep_rollback=false
+cleanup_install() {
+  if [[ -n $staged_venv ]]; then rm -rf -- "$staged_venv"; fi
+  if [[ -n $rollback_dir && -d $rollback_dir && $keep_rollback != true ]]; then
+    rm -rf -- "$rollback_dir"
+  fi
+}
+trap cleanup_install EXIT
+
+check_kibm_readiness() {
+  python3 - "$printer_ip" <<'PY'
+import json
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.request
+
+printer_ip = sys.argv[1]
+context = ssl._create_unverified_context()
+deadline = time.monotonic() + 30
+last_error = "keine Antwort"
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(
+            f"https://{printer_ip}:8765/api/health", timeout=3, context=context
+        ) as response:
+            result = json.loads(response.read(65536))
+            if response.status == 200 and result.get("ready") is True:
+                raise SystemExit(0)
+            last_error = f"Readiness-Prüfung meldet {result!r}"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        last_error = str(error)
+    time.sleep(1)
+print(f"KIBM-Bereitschaftsprüfung fehlgeschlagen: {last_error}", file=sys.stderr)
+raise SystemExit(1)
+PY
+}
+
 report_failure() {
+  local failure_status=$?
   echo "Installation fehlgeschlagen: ${install_step}." >&2
   if [[ $install_step == "KIBM starten und prüfen" ]]; then
     systemctl status "${units[@]}" --no-pager -l >&2 || true
     journalctl -b -u kibm.service -u kibm-auth.service -u kibm-media.service -n 35 --no-pager >&2 || true
   fi
+  if [[ ${rollback_snapshot_ready:-false} == true ]]; then
+    trap - ERR
+    if restore_previous_install; then
+      echo "Der vorherige KIBM-Stand wurde automatisch wiederhergestellt." >&2
+    else
+      echo "Automatische Wiederherstellung fehlgeschlagen. Sicherung bleibt unter: ${rollback_dir}" >&2
+      keep_rollback=true
+    fi
+  fi
+  return "$failure_status"
 }
 trap report_failure ERR
 
@@ -71,6 +127,77 @@ if mountpoint -q /run/kibm-media/volume 2>/dev/null ||
   echo "Bitte zuerst den USB-Stick in KIBM sicher auswerfen und dann das Update erneut starten." >&2
   exit 1
 fi
+
+if [[ -L $install_dir/venv ]]; then
+  rollback_venv=$(readlink -f "$install_dir/venv" 2>/dev/null || true)
+fi
+if [[ -d $rollback_venv && -f $install_dir/build-info.json ]]; then
+  install -d -m 0700 /var/lib/kibm
+  rollback_dir=$(mktemp -d /var/lib/kibm/update-rollback.XXXXXX)
+  rollback_archive=$rollback_dir/previous-install.tar.gz
+  rollback_targets=(
+    etc/kibm/admin-user
+    etc/kibm/tls.crt
+    etc/kibm/tls.key
+    etc/pam.d/kibm
+    etc/sudoers.d/kibm-admin
+    etc/systemd/system/kibm.service
+    etc/systemd/system/kibm-auth.service
+    etc/systemd/system/kibm-media.service
+    etc/systemd/system/kibm-update.service
+    etc/modules-load.d/kibm-loop.conf
+    etc/klipper-image-backup-manager.env
+    usr/local/sbin/kibm-admin
+    opt/klipper-image-backup-manager/backend
+    opt/klipper-image-backup-manager/tools
+    opt/klipper-image-backup-manager/pyproject.toml
+    opt/klipper-image-backup-manager/build-info.json
+    var/lib/kibm/managed-user
+  )
+  rollback_archive_targets=()
+  for target in "${rollback_targets[@]}"; do
+    if [[ -e /$target || -L /$target ]]; then rollback_archive_targets+=("$target"); fi
+  done
+  tar --create --gzip --file="$rollback_archive" --directory=/ "${rollback_archive_targets[@]}"
+  chmod 0600 "$rollback_archive"
+  rollback_snapshot_ready=true
+  echo "Der vorherige KIBM-Stand wurde für einen automatischen Rollback gesichert."
+elif [[ -d $install_dir ]]; then
+  echo "Kein vollständiger vorheriger KIBM-Stand für automatischen Rollback gefunden." >&2
+fi
+
+restore_previous_install() {
+  local failed_venv=""
+  local rollback_ok=true
+  if [[ -L $install_dir/venv ]]; then failed_venv=$(readlink -f "$install_dir/venv" 2>/dev/null || true); fi
+  set +e
+  for service in "${units[@]}"; do systemctl stop "$service" || rollback_ok=false; done
+  for target in "${rollback_targets[@]}"; do rm -rf -- "/$target" || rollback_ok=false; done
+  tar --extract --gzip --preserve-permissions --same-owner --file="$rollback_archive" --directory=/ || rollback_ok=false
+  if [[ -d $rollback_venv ]]; then
+    ln -sfn "$rollback_venv" "$install_dir/venv.rollback" || rollback_ok=false
+    mv -Tf "$install_dir/venv.rollback" "$install_dir/venv" || rollback_ok=false
+  else
+    rollback_ok=false
+  fi
+  if [[ $failed_venv == "$install_dir"/venv.* && $failed_venv != "$rollback_venv" ]]; then
+    rm -rf -- "$failed_venv" || rollback_ok=false
+  fi
+  systemctl daemon-reload || rollback_ok=false
+  systemctl reset-failed "${units[@]}" 2>/dev/null || true
+  systemctl enable --now "${units[@]}" || rollback_ok=false
+  check_kibm_readiness || rollback_ok=false
+  if [[ $rollback_ok == true ]]; then
+    echo "Vorherige Version ist wiederhergestellt und KIBM ist bereit." >&2
+    rm -rf -- "$rollback_dir"
+    rollback_dir=
+    rollback_snapshot_ready=false
+    return 0
+  fi
+  keep_rollback=true
+  echo "Rollback konnte nicht vollständig verifiziert werden." >&2
+  return 1
+}
 
 install_step="Systempakete installieren"
 missing_packages=()
@@ -167,7 +294,6 @@ chmod 0644 /etc/kibm/tls.crt
 install_step="Frische Python-Umgebung aufbauen"
 venv_path=$(mktemp -d "$install_dir/venv.XXXXXX")
 staged_venv=$venv_path
-trap 'if [[ -n $staged_venv ]]; then rm -rf -- "$staged_venv"; fi' EXIT
 python3 -m venv "$venv_path"
 "$venv_path/bin/python" -m pip install --disable-pip-version-check .
 chmod -R a+rX "$venv_path"
@@ -223,36 +349,17 @@ systemctl daemon-reload
 install_step="KIBM starten und prüfen"
 systemctl reset-failed "${units[@]}" 2>/dev/null || true
 systemctl enable --now "${units[@]}"
-if ! python3 - "$printer_ip" <<'PY'
-import json
-import ssl
-import sys
-import time
-import urllib.error
-import urllib.request
-
-printer_ip = sys.argv[1]
-context = ssl._create_unverified_context()
-deadline = time.monotonic() + 30
-last_error = "keine Antwort"
-while time.monotonic() < deadline:
-    try:
-        with urllib.request.urlopen(
-            f"https://{printer_ip}:8765/api/health", timeout=3, context=context
-        ) as response:
-            result = json.loads(response.read(65536))
-            if response.status == 200 and result.get("ready") is True:
-                raise SystemExit(0)
-            last_error = f"Readiness-Prüfung meldet {result!r}"
-    except (OSError, ValueError, urllib.error.URLError) as error:
-        last_error = str(error)
-    time.sleep(1)
-print(f"KIBM wurde installiert, aber die Bereitschaftsprüfung schlug fehl: {last_error}", file=sys.stderr)
-raise SystemExit(1)
-PY
-then
+if ! check_kibm_readiness; then
+  echo "KIBM wurde installiert, aber die Bereitschaftsprüfung schlug fehl." >&2
   systemctl status "${units[@]}" --no-pager -l >&2 || true
   journalctl -b -u kibm.service -u kibm-auth.service -u kibm-media.service -n 35 --no-pager >&2 || true
+  if [[ ${rollback_snapshot_ready} == true ]]; then
+    if restore_previous_install; then
+      echo "Die vorherige Version wurde automatisch zurückgerollt." >&2
+    else
+      echo "Rollback fehlgeschlagen; Sicherung bleibt unter ${rollback_dir}." >&2
+    fi
+  fi
   exit 1
 fi
 if [[ $old_venv == "$install_dir"/venv.* && $old_venv != "$venv_path" ]]; then
