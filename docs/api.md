@@ -19,4 +19,4 @@ System diagnosis is available without login on the trusted local network. Image 
 | `GET` | `/api/backup/jobs/{job_id}` | Returns authenticated transfer progress and SHA-256 |
 | `GET` | `/api/backup/download/{job_id}?token=…` | Streams the complete raw card image to the browser (authenticated, one use) |
 
-OpenAPI docs are disabled in this alpha. No endpoint restarts the printer, accepts a shell command, or changes partitions.
+OpenAPI docs are disabled in this beta. No endpoint restarts the printer, accepts a shell command, or changes partitions.

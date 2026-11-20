@@ -22,7 +22,7 @@ SESSION_TTL_SECONDS = 4 * 60 * 60
 sessions: dict[str, tuple[str, float]] = {}
 login_attempts: dict[str, list[float]] = {}
 usb_jobs: dict[str, tuple[str, str]] = {}
-app = FastAPI(title="Klipper Image Backup Manager", version="0.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="Klipper Image Backup Manager", version="0.2.0b1", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 
