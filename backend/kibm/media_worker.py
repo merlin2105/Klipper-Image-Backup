@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import grp
 import json
+import logging
 import os
 import pwd
 import re
@@ -32,6 +33,7 @@ USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_BYTES = 4096
 PRINTER_RECHECK_SECONDS = 10
 BUSY_STATES = {"wird vorbereitet", "formatieren", "sichern", "verifizieren", "schrumpfen"}
+logger = logging.getLogger("kibm.media")
 
 
 @dataclass
@@ -538,6 +540,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
         if len(raw) > MAX_REQUEST_BYTES or not raw.endswith(b"\n"):
             self._reply({"error": "invalid_request"})
             return
+        action = "unknown"
         try:
             request = json.loads(raw)
             action = request.get("action")
@@ -562,7 +565,14 @@ class MediaHandler(socketserver.StreamRequestHandler):
             else:
                 self._reply({"error": "unsupported_action"})
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
-            self._reply({"error": str(exc) or "media_operation_failed"})
+            detail = str(exc) or "media_operation_failed"
+            if isinstance(exc, subprocess.CalledProcessError):
+                output = (exc.stderr or exc.stdout or "").strip()
+                if output:
+                    detail = f"{detail}: {output}"
+            if action == "update_start":
+                logger.error("Update start rejected: %s", detail)
+            self._reply({"error": detail})
 
     def _list_images(self) -> None:
         with _lock:

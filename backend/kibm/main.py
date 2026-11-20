@@ -236,7 +236,11 @@ def start_update(body: UpdateRequest, request: Request, csrf_header: Optional[st
         return _media_request({"action": "update_start"})
     except HTTPException:
         raise
-    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=503, detail="Der Update-Dienst hat eine ungültige Antwort gesendet.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (OSError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="Der Update-Dienst ist derzeit nicht verfügbar.") from exc
 
 
