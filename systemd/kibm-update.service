@@ -1,0 +1,9 @@
+[Unit]
+Description=Update Klipper Image Backup Manager from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kibm-admin update-run
+TimeoutStartSec=30min

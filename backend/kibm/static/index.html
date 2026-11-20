@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=existing-usb-image">
-  <script src="/static/app.js?v=existing-usb-image" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=image-check-update">
+  <script src="/static/app.js?v=image-check-update" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -30,6 +30,11 @@
           <span class="strip-tag" id="host-name">KLIPPER HOST</span>
         </section>
 
+        <section id="update-panel" class="update-panel panel" aria-live="polite" hidden>
+          <div><strong id="update-title">GitHub-Version wird geprüft …</strong><p id="update-detail">KIBM fragt den aktuellen Stand von GitHub ab.</p></div>
+          <button id="update-button" class="secondary-button" type="button" hidden>Update installieren</button>
+        </section>
+
         <section class="section-head"><div><h2>Backup-Bereitschaft</h2></div><span class="section-note">DIAGNOSE</span></section>
         <section id="backup" class="backup-panel panel">
           <div class="backup-intro"><div><h3>Image der System-microSD</h3><p id="backup-intro-copy">Wähle, ob KIBM das vollständige Karten-Image direkt an den PC streamt oder auf einem USB-Stick sichert.</p></div><svg class="backup-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg></div>
@@ -46,7 +51,7 @@
             </button>
             <button id="destination-existing" class="destination-card" type="button" aria-pressed="false" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8l3 3m0-3v3H8m8 5-3-3m0 3v-3h3"/></svg>
-              <span><strong>USB-Image verkleinern</strong><small>Vorhandene Datei mit PiShrink bearbeiten</small></span>
+              <span><strong>USB-Image prüfen</strong><small>Erst prüfen, dann bei Bedarf verkleinern</small></span>
             </button>
           </div>
           <p id="pc-options" class="pc-options" hidden>Der Browser speichert das vollständige Image im gewünschten Ordner. Plane Platz für die gesamte microSD ein.</p>
@@ -71,6 +76,7 @@
           </div>
           <div id="existing-options" class="usb-options" hidden>
             <div class="usb-select-row"><label for="existing-image">Image auf USB</label><select id="existing-image"><option value="">Image auswählen</option></select></div>
+            <p id="existing-image-analysis" class="usb-format-note">KIBM prüft Dateisystem und Partitionsgrößen unabhängig vom Dateinamen.</p>
             <p class="usb-format-note">PiShrink erstellt eine verkleinerte Kopie auf demselben Stick. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.</p>
           </div>
           <div id="backup-confirmations" class="backup-confirmations" hidden>
@@ -85,11 +91,23 @@
 
         <dialog id="backup-login" class="backup-dialog" aria-labelledby="backup-dialog-title">
           <form id="backup-form">
+            <input type="text" name="username" autocomplete="username" hidden>
             <h2 id="backup-dialog-title">Mit deinem Pi-Konto anmelden</h2>
             <p id="backup-dialog-detail">Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.</p>
             <div id="pi-auth-fields"><label for="pi-password">Bestehendes Pi-Passwort</label><input id="pi-password" name="password" type="password" autocomplete="current-password" required></div>
             <p id="backup-login-error" class="error-text" role="alert"></p>
             <div class="dialog-actions"><button id="backup-cancel" class="secondary-button" type="button">Abbrechen</button><button class="primary-button" type="submit"><span id="dialog-submit-label">Image herunterladen</span> <span aria-hidden="true">↓</span></button></div>
+          </form>
+        </dialog>
+
+        <dialog id="update-dialog" class="backup-dialog" aria-labelledby="update-dialog-title">
+          <form id="update-form">
+            <input type="text" name="username" autocomplete="username" hidden>
+            <h2 id="update-dialog-title">KIBM aktualisieren?</h2>
+            <p id="update-dialog-detail">Die aktuelle Version wird von GitHub geladen. KIBM startet während des Updates kurz neu.</p>
+            <div id="update-auth-fields"><label for="update-password">Bestehendes Pi-Passwort</label><input id="update-password" type="password" autocomplete="current-password" required></div>
+            <p id="update-error" class="error-text" role="alert"></p>
+            <div class="dialog-actions"><button id="update-cancel" class="secondary-button" type="button">Abbrechen</button><button id="update-submit" class="primary-button" type="submit">Jetzt aktualisieren</button></div>
           </form>
         </dialog>
 

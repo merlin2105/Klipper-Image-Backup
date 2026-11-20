@@ -61,6 +61,7 @@ _job: Optional[MediaJob] = None
 _worker_uid: Optional[int] = None
 _worker_gid: Optional[int] = None
 _listed_images: dict[str, dict[str, Any]] = {}
+_image_classification_cache: dict[tuple[str, int, int], dict[str, Any]] = {}
 
 
 def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -174,6 +175,69 @@ def _mounted_volume(path: Path, volume: dict[str, Any]) -> bool:
     return path.is_mount() and path.stat().st_dev == volume["rdev"]
 
 
+def _classify_image(path: Path, image_size: int, mtime_ns: int, *, use_cache: bool = True) -> dict[str, Any]:
+    cache_key = (path.name, image_size, mtime_ns)
+    if use_cache and cache_key in _image_classification_cache:
+        return dict(_image_classification_cache[cache_key])
+    try:
+        result = _inspect_image(path, image_size, mtime_ns)
+    except (OSError, ValueError, IndexError, struct.error):
+        result = {"status": "unknown", "estimated_savings_bytes": 0}
+    if use_cache:
+        if len(_image_classification_cache) >= 128:
+            _image_classification_cache.clear()
+        _image_classification_cache[cache_key] = result
+    return result
+
+
+def _inspect_image(path: Path, image_size: int, mtime_ns: int) -> dict[str, Any]:
+    # Parse fixed MBR/ext4 fields directly; do not run filesystem tools as root
+    # against arbitrary images discovered on a USB drive.
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size != image_size or info.st_mtime_ns != mtime_ns:
+            return {"status": "unknown", "estimated_savings_bytes": 0}
+        mbr = os.pread(fd, 512, 0)
+        if len(mbr) != 512 or mbr[510:512] != b"\x55\xaa":
+            return {"status": "unknown", "estimated_savings_bytes": 0}
+        partitions = []
+        for index in range(4):
+            entry = mbr[446 + index * 16:462 + index * 16]
+            first_sector = struct.unpack_from("<I", entry, 8)[0]
+            sector_count = struct.unpack_from("<I", entry, 12)[0]
+            if not first_sector or not sector_count:
+                continue
+            partitions.append((first_sector * 512, sector_count * 512))
+        for start, partition_size in sorted(partitions, reverse=True):
+            superblock = os.pread(fd, 1024, start + 1024)
+            if len(superblock) != 1024 or struct.unpack_from("<H", superblock, 56)[0] != 0xEF53:
+                continue
+            log_block_size = struct.unpack_from("<I", superblock, 24)[0]
+            if log_block_size > 6:
+                return {"status": "unknown", "estimated_savings_bytes": 0}
+            block_size = 1024 << log_block_size
+            blocks = struct.unpack_from("<I", superblock, 4)[0]
+            free_blocks = struct.unpack_from("<I", superblock, 12)[0]
+            incompat_features = struct.unpack_from("<I", superblock, 96)[0]
+            if incompat_features & 0x80:
+                blocks |= struct.unpack_from("<I", superblock, 0x150)[0] << 32
+                free_blocks |= struct.unpack_from("<I", superblock, 0x158)[0] << 32
+            filesystem_size = blocks * block_size
+            if not blocks or filesystem_size > partition_size or start + partition_size > image_size + 512:
+                return {"status": "unknown", "estimated_savings_bytes": 0}
+            safety_blocks = 5000 if free_blocks > 5000 else 1000 if free_blocks > 1000 else 100 if free_blocks > 100 else 0
+            free_space = max(0, free_blocks - safety_blocks) * block_size
+            partition_slack = partition_size - filesystem_size
+            image_tail = max(0, image_size - start - partition_size)
+            savings = free_space + partition_slack + image_tail
+            status = "shrinkable" if savings >= 256 * 1024 * 1024 else "already_compact"
+            return {"status": status, "estimated_savings_bytes": savings}
+        return {"status": "unknown", "estimated_savings_bytes": 0}
+    finally:
+        os.close(fd)
+
+
 def _mount_image_volume(volume: dict[str, Any], target: Path, mode: str) -> None:
     target.mkdir(mode=0o750, exist_ok=True)
     if target.is_mount():
@@ -198,10 +262,11 @@ def _existing_images() -> list[dict[str, Any]]:
                         continue
                     info = path.lstat()
                     if stat.S_ISREG(info.st_mode) and info.st_size > 0:
+                        shrinkability = _classify_image(path, info.st_size, info.st_mtime_ns)
                         images.append({
                             "id": _image_id(volume, path, info), "filename": path.name,
                             "size_bytes": info.st_size, "device": volume["device"]["path"],
-                            "partition": volume["path"], "volume": volume,
+                            "partition": volume["path"], "shrinkability": shrinkability, "volume": volume,
                         })
                     if len(images) >= 100:
                         return images
@@ -351,6 +416,9 @@ def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
         info = source.lstat()
         if not stat.S_ISREG(info.st_mode) or _image_id(volume, source, info) != image["id"]:
             raise ValueError("Die Image-Datei wurde seit der Auswahl verändert. Wähle sie erneut aus.")
+        shrinkability = _classify_image(source, info.st_size, info.st_mtime_ns, use_cache=False)
+        if shrinkability["status"] != "shrinkable":
+            raise ValueError("Das Image ist bereits kompakt oder sein Dateisystem lässt sich nicht sicher prüfen.")
         filesystem = os.statvfs(VOLUME_PATH)
         if filesystem.f_bavail * filesystem.f_frsize < job.image_size:
             raise ValueError("Auf dem Stick fehlt freier Speicherplatz für eine vollständige Arbeitskopie.")
@@ -487,6 +555,10 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._download(request)
             elif action == "eject":
                 self._eject(request)
+            elif action == "update_status":
+                self._update_status()
+            elif action == "update_start":
+                self._update_start()
             else:
                 self._reply({"error": "unsupported_action"})
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
@@ -512,6 +584,8 @@ class MediaHandler(socketserver.StreamRequestHandler):
             image = _listed_images.get(request.get("image_id"))
             if not image:
                 raise ValueError("Die Image-Datei ist nicht mehr verfügbar. Wähle sie erneut aus.")
+            if image.get("shrinkability", {}).get("status") != "shrinkable":
+                raise ValueError("Dieses Image ist bereits kompakt oder kann nicht sicher geprüft werden.")
             volume = image["volume"]
             job = MediaJob(
                 job_id=secrets.token_hex(10), state="wird vorbereitet", phase="vorbereitung",
@@ -597,6 +671,41 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 _run(["sync"])
                 _run(["umount", "--", str(VOLUME_PATH)])
         self._reply({"ejected": True})
+
+    def _update_status(self) -> None:
+        output = _run([
+            "systemctl", "show", "kibm-update.service", "--property=LoadState", "--property=ActiveState", "--property=Result",
+            "--property=ExecMainStatus", "--property=ExecMainStartTimestamp",
+        ], timeout=10).stdout
+        fields = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+        loaded = fields.get("LoadState") == "loaded"
+        active = fields.get("ActiveState", "unknown")
+        result = fields.get("Result", "")
+        started = bool(fields.get("ExecMainStartTimestamp", ""))
+        if not loaded:
+            state = "unavailable"
+        elif active in {"activating", "active", "deactivating"}:
+            state = "running"
+        elif active == "failed" or (started and result not in {"", "success"}):
+            state = "failed"
+        elif started and result == "success":
+            state = "success"
+        else:
+            state = "idle"
+        self._reply({"available": loaded, "state": state, "exit_status": fields.get("ExecMainStatus")})
+
+    def _update_start(self) -> None:
+        with _lock:
+            if _job and (_job.state in BUSY_STATES or _job.active_downloads):
+                raise ValueError("Warte, bis das USB-Image fertig ist und alle Downloads abgeschlossen sind.")
+            if os.path.ismount(str(VOLUME_PATH)):
+                raise ValueError("Bitte den USB-Stick vor dem Update sicher auswerfen.")
+        status = _run(["systemctl", "show", "kibm-update.service", "--property=ActiveState", "--value"], timeout=10).stdout.strip()
+        if status in {"active", "activating", "deactivating"}:
+            raise ValueError("Ein Update läuft bereits.")
+        _run(["systemctl", "reset-failed", "kibm-update.service"], timeout=10)
+        _run(["systemctl", "start", "--no-block", "kibm-update.service"], timeout=10)
+        self._reply({"state": "running"})
 
     def _reply(self, result: dict[str, Any]) -> None:
         self.wfile.write(json.dumps(result).encode("utf-8") + b"\n")

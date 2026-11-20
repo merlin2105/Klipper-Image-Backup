@@ -32,6 +32,14 @@ class AuthHandler(socketserver.StreamRequestHandler):
             return
         try:
             payload = json.loads(raw)
+            if payload.get("action") == "health":
+                username = ADMIN_USER_PATH.read_text(encoding="utf-8").strip()
+                pwd.getpwnam(username)
+                import PAM
+
+                PAM.pam().start("kibm")
+                self.wfile.write(b'{"ready":true}\n')
+                return
             password = payload.get("password")
             if not isinstance(password, str) or not 1 <= len(password) <= 512 or "\0" in password:
                 self._reply(False)

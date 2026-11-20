@@ -1,7 +1,7 @@
 [Unit]
 Description=Klipper Image Backup Manager
-After=network-online.target
-Wants=network-online.target
+After=network-online.target kibm-auth.service kibm-media.service
+Wants=network-online.target kibm-auth.service kibm-media.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -11,7 +11,7 @@ User=kibm
 Group=kibm
 SupplementaryGroups=disk
 WorkingDirectory=/opt/klipper-image-backup-manager
-ExecStart=/opt/klipper-image-backup-manager/venv/bin/uvicorn kibm.main:app --app-dir /opt/klipper-image-backup-manager/backend --host 0.0.0.0 --port 8765 --no-access-log --ssl-certfile=/etc/kibm/tls.crt --ssl-keyfile=/etc/kibm/tls.key
+ExecStart=/opt/klipper-image-backup-manager/venv/bin/python -m uvicorn kibm.main:app --app-dir /opt/klipper-image-backup-manager/backend --host 0.0.0.0 --port 8765 --no-access-log --ssl-certfile=/etc/kibm/tls.crt --ssl-keyfile=/etc/kibm/tls.key
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

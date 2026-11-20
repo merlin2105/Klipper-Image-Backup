@@ -121,3 +121,8 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 #destination-existing { grid-column: 1 / -1; }
 #existing-image { grid-column: 2 / -1; min-width: 0; }
 @media (max-width: 680px) { #existing-image { grid-column: 1 / -1; } }
+.update-panel { display:flex;align-items:center;justify-content:space-between;gap:18px;margin:18px 0 28px;padding:18px 20px;border-color:var(--line);background:var(--panel); }
+.update-panel strong { font-size:14px; }
+.update-panel p { margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.6; }
+.update-panel .secondary-button { flex:none; }
+@media(max-width:680px){.update-panel{align-items:stretch;flex-direction:column;margin:12px 0 22px;padding:16px}.update-panel .secondary-button{width:100%}}

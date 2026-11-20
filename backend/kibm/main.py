@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import image_stream, services
+from . import image_stream, services, updates
 
 APP_DIR = Path(__file__).parent
 AUTH_SOCKET = "/run/kibm-auth/auth.sock"
@@ -48,6 +48,10 @@ class UsbShrinkRequest(BaseModel):
     confirmed: bool
 
 
+class UpdateRequest(BaseModel):
+    confirmed: bool
+
+
 def _session(request: Request) -> tuple[str, str]:
     cookie = request.cookies.get("kibm_session", "")
     entry = sessions.get(cookie)
@@ -67,14 +71,18 @@ def _require_csrf(request: Request, csrf_header: Optional[str]) -> tuple[str, st
     return session_id, expected
 
 
-def _authenticate_pi_password(password: str) -> bool:
+def _auth_request(payload: dict) -> dict:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as auth_socket:
         auth_socket.settimeout(5)
         auth_socket.connect(AUTH_SOCKET)
-        auth_socket.sendall(json.dumps({"password": password}).encode("utf-8") + b"\n")
+        auth_socket.sendall(json.dumps(payload).encode("utf-8") + b"\n")
         with auth_socket.makefile("rb") as stream:
             response = stream.readline(256)
-    result = json.loads(response)
+    return json.loads(response)
+
+
+def _authenticate_pi_password(password: str) -> bool:
+    result = _auth_request({"password": password})
     if result.get("error") == "authentication_unavailable":
         raise RuntimeError("Pi password authentication is unavailable")
     return result.get("authenticated") is True
@@ -152,6 +160,22 @@ async def get_system():
     return services.system_info()
 
 
+@app.get("/api/health")
+def get_health(response: Response):
+    checks = {"pi_auth": False, "usb": False}
+    try:
+        checks["pi_auth"] = _auth_request({"action": "health"}).get("ready") is True
+    except (OSError, ValueError):
+        pass
+    try:
+        checks["usb"] = isinstance(_media_request({"action": "devices"}).get("devices"), list)
+    except (OSError, ValueError, RuntimeError):
+        pass
+    ready = all(checks.values())
+    response.status_code = 200 if ready else 503
+    return {"ready": ready, "checks": checks}
+
+
 @app.get("/api/storage")
 async def get_storage():
     return services.storage_info()
@@ -186,6 +210,34 @@ def get_usb_images():
         return _media_request({"action": "images"})
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=503, detail="USB-Images können nicht gelesen werden.") from exc
+
+
+@app.get("/api/update")
+def get_update_status():
+    try:
+        worker = _media_request({"action": "update_status"})
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+        worker = None
+    return updates.status(worker)
+
+
+@app.post("/api/update")
+def start_update(body: UpdateRequest, request: Request, csrf_header: Optional[str] = Header(default=None, alias="X-KIBM-CSRF")):
+    _require_csrf(request, csrf_header)
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Bestätige zuerst das Update.")
+    try:
+        worker = _media_request({"action": "update_status"})
+        current = updates.status(worker)
+        if not current["update_available"]:
+            raise HTTPException(status_code=409, detail="Es ist kein neues GitHub-Update verfügbar.")
+        if not current["can_update"]:
+            raise HTTPException(status_code=503, detail="Der Web-Updater ist auf dieser Installation nicht bereit.")
+        return _media_request({"action": "update_start"})
+    except HTTPException:
+        raise
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Der Update-Dienst ist derzeit nicht verfügbar.") from exc
 
 
 @app.get("/api/session")

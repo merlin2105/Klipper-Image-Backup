@@ -13,6 +13,7 @@ let usbDeviceSignature = null;
 let usbScanInProgress = false;
 let usbImages = [];
 let imageScanInProgress = false;
+let updatePoll = null;
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -109,6 +110,7 @@ async function loadDashboard() {
     renderReadiness(currentReadiness);
     await loadUsbDevices();
     updateDestination();
+    refreshUpdateStatus();
     $("footer-time").textContent = `AKTUALISIERT ${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
   } catch (error) {
     showError(error.message);
@@ -179,11 +181,60 @@ function renderExistingImages(images) {
   usbImages = images;
   select.replaceChildren(new Option("Image auswählen", ""));
   for (const image of images) {
-    select.append(new Option(`${image.filename} · ${formatBytes(image.size_bytes)} · ${image.partition}`, image.id));
+    const status = image.shrinkability?.status === "shrinkable"
+      ? `noch ca. ${formatBytes(image.shrinkability.estimated_savings_bytes)} verkleinerbar`
+      : image.shrinkability?.status === "already_compact" ? "bereits kompakt" : "nicht sicher prüfbar";
+    select.append(new Option(`${image.filename} · ${formatBytes(image.size_bytes)} · ${status}`, image.id));
   }
   if (images.some(image => image.id === selected)) select.value = selected;
   if (destination === "existing" && !images.length && !activeJobId) destination = null;
   updateDestination();
+}
+
+async function refreshUpdateStatus() {
+  try {
+    const status = await api("/api/update", { signal: AbortSignal.timeout(7000) });
+    const worker = status.worker || {};
+    const panel = $("update-panel");
+    const button = $("update-button");
+    panel.hidden = false;
+    button.hidden = !status.can_update || worker.state === "running";
+    button.disabled = worker.state === "running";
+    if (worker.state === "running") {
+      $("update-title").textContent = "Update wird installiert";
+      $("update-detail").textContent = "KIBM lädt die GitHub-Version und startet die Dienste neu. Diese Seite kann kurz nicht erreichbar sein.";
+      window.clearTimeout(updatePoll);
+      updatePoll = window.setTimeout(refreshUpdateStatus, 3000);
+    } else if (worker.state === "failed") {
+      $("update-title").textContent = "Letztes Update fehlgeschlagen";
+      $("update-detail").textContent = `Der Installer wurde mit Status ${worker.exit_status || "unbekannt"} beendet. Logs: sudo kibm-admin logs.`;
+    } else if (status.check_error) {
+      $("update-title").textContent = "GitHub-Version derzeit nicht erreichbar";
+      $("update-detail").textContent = "Sobald der Pi GitHub erreicht, wird die Versionsprüfung automatisch wiederholt.";
+      button.hidden = true;
+      window.clearTimeout(updatePoll);
+      updatePoll = window.setTimeout(refreshUpdateStatus, 60000);
+    } else if (status.update_available && !status.can_update) {
+      $("update-title").textContent = "Update vorhanden · Web-Updater nicht bereit";
+      $("update-detail").textContent = "Diese ältere Installation muss einmalig per SSH mit sudo kibm-admin update aktualisiert werden. Danach kannst du Updates hier starten.";
+    } else if (status.update_available) {
+      $("update-title").textContent = "Update vorhanden";
+      const current = status.current_commit ? status.current_commit.slice(0, 8) : "unbekannt";
+      const latest = status.latest_commit.sha.slice(0, 8);
+      const dirty = status.current_dirty ? " · installierte Version enthält lokale Änderungen" : "";
+      $("update-detail").textContent = `${current} → ${latest}${dirty} · ${status.latest_commit.message}`;
+    } else {
+      $("update-title").textContent = "KIBM ist aktuell";
+      $("update-detail").textContent = `Installiert: ${(status.current_commit || "unbekannt").slice(0, 8)} · GitHub: ${status.latest_commit.sha.slice(0, 8)}.`;
+    }
+  } catch {
+    $("update-panel").hidden = false;
+    $("update-button").hidden = true;
+    $("update-title").textContent = "Update-Status nicht verfügbar";
+    $("update-detail").textContent = "KIBM versucht die Versionsprüfung erneut.";
+    window.clearTimeout(updatePoll);
+    updatePoll = window.setTimeout(refreshUpdateStatus, 10000);
+  }
 }
 
 async function loadExistingImages() {
@@ -240,6 +291,8 @@ function requiredUsbCapacity(shrink) {
 function updateDestination() {
   const usbMode = isUsbDestination();
   const existingMode = destination === "existing";
+  const existingImage = usbImages.find(image => image.id === $("existing-image").value);
+  const existingCanShrink = existingImage?.shrinkability?.status === "shrinkable";
   const device = selectedUsbDevice();
   const shrink = $("shrink-image").checked;
   const running = Boolean(activeJobId);
@@ -261,10 +314,17 @@ function updateDestination() {
   const ready = existingMode
     ? Boolean(readiness && readiness.printer?.classification !== "active")
     : Boolean(readiness?.backup_available);
+  $("existing-image-analysis").textContent = !existingImage
+    ? "KIBM prüft Dateisystem und Partitionsgrößen unabhängig vom Dateinamen."
+    : existingCanShrink
+      ? `KIBM erkennt etwa ${formatBytes(existingImage.shrinkability.estimated_savings_bytes)} möglichen Shrink-Spielraum. Die tatsächliche Ersparnis kann geringer sein; das Original bleibt erhalten.`
+      : existingImage.shrinkability?.status === "already_compact"
+        ? "Das Image ist bereits kompakt oder bietet weniger als 256 MB geschätzten Shrink-Spielraum. Ein erneuter Shrink wird nicht angeboten."
+        : "Das Dateisystem konnte nicht sicher geprüft werden. KIBM bietet deshalb keinen Shrink an.";
   const minimumUsbBytes = requiredUsbCapacity(shrink);
   const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
   $("start-backup").disabled = !destination || !ready || running || !$("backup-confirm").checked
-    || (existingMode && !$("existing-image").value)
+    || (existingMode && (!$("existing-image").value || !existingCanShrink))
     || (usbMode && (!device || targetTooSmall || !$("format-confirm").checked));
   let capacityMessage = "";
   if (targetTooSmall) {
@@ -376,6 +436,55 @@ $("usb-device").addEventListener("change", () => {
 });
 $("shrink-image").addEventListener("change", updateDestination);
 $("refresh-usb").addEventListener("click", loadUsbDevices);
+
+$("update-button").addEventListener("click", async () => {
+  try {
+    const session = await api("/api/session");
+    const status = await api("/api/update");
+    csrfToken = session.authenticated ? session.csrf_token : "";
+    $("update-auth-fields").hidden = session.authenticated;
+    $("update-password").required = !session.authenticated;
+    $("update-password").value = "";
+    $("update-error").textContent = "";
+    const latest = status.latest_commit?.sha?.slice(0, 8) || "unbekannt";
+    $("update-dialog-detail").textContent = `GitHub main · Commit ${latest}. KIBM lädt den Stand herunter und startet seine Dienste neu; die Oberfläche ist kurz nicht erreichbar.`;
+    $("update-dialog").showModal();
+  } catch (error) {
+    $("update-detail").textContent = error.message;
+  }
+});
+
+$("update-cancel").addEventListener("click", () => {
+  $("update-password").value = "";
+  $("update-dialog").close();
+});
+
+$("update-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submit = $("update-submit");
+  submit.disabled = true;
+  $("update-error").textContent = "";
+  try {
+    if (!csrfToken) {
+      const login = await api("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ password: $("update-password").value }),
+      });
+      csrfToken = login.csrf_token;
+      $("update-password").value = "";
+    }
+    await api("/api/update", { method: "POST", body: JSON.stringify({ confirmed: true }) });
+    $("update-dialog").close();
+    $("update-title").textContent = "Update wird gestartet …";
+    $("update-detail").textContent = "KIBM lädt die bestätigte Version von GitHub.";
+    $("update-button").hidden = true;
+    window.setTimeout(refreshUpdateStatus, 1500);
+  } catch (error) {
+    $("update-error").textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 $("start-backup").addEventListener("click", async () => {
   try {
@@ -660,3 +769,6 @@ window.setInterval(() => {
 window.setInterval(() => {
   if (document.visibilityState === "visible") loadExistingImages();
 }, 10000);
+window.setInterval(() => {
+  if (document.visibilityState === "visible") refreshUpdateStatus();
+}, 15 * 60 * 1000);

@@ -8,11 +8,15 @@ cd Klipper-Image-Backup
 sudo ./install.sh
 ```
 
-The installer does not edit boot files, EEPROM settings, partitions, Klipper, Moonraker, Mainsail, or Fluidd. It creates a `kibm` system user, a Python virtual environment under `/opt/klipper-image-backup-manager`, and the `kibm.service` and `kibm-auth.service` systemd units. Authentication uses the invoking user's existing Linux password; KIBM neither creates a password nor stores the password. Re-running the installer retains the TLS certificate unless the printer's LAN IP changes.
+The installer does not edit boot files, EEPROM settings, partitions, Klipper, Moonraker, Mainsail, or Fluidd. It creates a `kibm` system user, a Python virtual environment under `/opt/klipper-image-backup-manager`, and the KIBM web, authentication, media, and update systemd units. Authentication uses the invoking user's existing Linux password; KIBM neither creates a password nor stores the password. Re-running the installer retains the TLS certificate unless the printer's LAN IP changes.
 
 After installation, open `https://<printer-ip>:8765` from a browser on the trusted local network and confirm the locally generated certificate once. The full raw microSD image is streamed directly to the browser; use the browser's normal save dialog to select a PC folder. Do not port-forward the service to the internet. To remove it, run `sudo ./uninstall.sh`. Deinstallation removes KIBM files, its units, local certificate, and the KIBM service account; it never changes printer or boot configuration.
 
 The dashboard diagnosis is available on the LAN. Image creation and download require a session authenticated with the existing Pi account password. Do not expose port 8765 to the internet.
+
+When GitHub `main` has a newer commit, the dashboard offers an update button. Updating requires the existing Pi account session and a separate confirmation. KIBM downloads that exact commit and runs the regular installer in a dedicated systemd unit; its web page is briefly unavailable while the services restart. The Pi must be able to reach GitHub over HTTPS.
+
+Installations predating the dashboard updater need one initial update over SSH with `sudo kibm-admin update`.
 
 ## Installer acceptance criteria
 
