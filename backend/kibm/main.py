@@ -103,6 +103,15 @@ def _media_request(payload: dict) -> dict:
     return result
 
 
+def _ensure_update_idle() -> None:
+    try:
+        status = _media_request({"action": "update_status"})
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Der KIBM-Dienststatus ist nicht verfügbar.") from exc
+    if status.get("state") == "running":
+        raise HTTPException(status_code=409, detail="KIBM wird gerade aktualisiert. Bitte warte, bis der Vorgang abgeschlossen ist.")
+
+
 def _media_download(job_id: str, filename: str):
     media_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     media_socket.settimeout(None)
@@ -226,6 +235,8 @@ def start_update(body: UpdateRequest, request: Request, csrf_header: Optional[st
     _require_csrf(request, csrf_header)
     if not body.confirmed:
         raise HTTPException(status_code=400, detail="Bestätige zuerst das Update.")
+    if image_stream.has_active_job():
+        raise HTTPException(status_code=409, detail="Ein SD-Karten-Image wird gerade vorbereitet oder übertragen. Warte bitte bis zum Abschluss.")
     try:
         worker = _media_request({"action": "update_status"})
         current = updates.status(worker)
@@ -302,6 +313,7 @@ async def start_backup(
     session_id, _ = _require_csrf(request, x_kibm_csrf)
     if not body.confirmed:
         raise HTTPException(status_code=400, detail="Bestätige zuerst die Erstellung des vollständigen SD-Karten-Images.")
+    _ensure_update_idle()
     preflight = services.backup_preflight()
     if not preflight["backup_available"]:
         raise HTTPException(status_code=409, detail=" ".join(preflight["blockers"]))
@@ -324,6 +336,7 @@ async def backup_job_status(job_id: str, request: Request):
 @app.get("/api/backup/download/{job_id}")
 async def download_backup(job_id: str, request: Request, token: str):
     session_id, _ = _session(request)
+    _ensure_update_idle()
     try:
         job = image_stream.claim_download(job_id, session_id, token)
     except (KeyError, ValueError) as exc:
@@ -352,6 +365,7 @@ async def start_usb_backup(
         raise HTTPException(status_code=400, detail="Bestätige zuerst den sicheren Druckerstatus.")
     if not body.format_confirmed:
         raise HTTPException(status_code=400, detail="Bestätige, dass der gewählte USB-Stick formatiert und vollständig gelöscht werden darf.")
+    _ensure_update_idle()
     preflight = services.backup_preflight()
     if not preflight["backup_available"]:
         raise HTTPException(status_code=409, detail=" ".join(preflight["blockers"]))

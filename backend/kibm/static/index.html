@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=image-check-update">
-  <script src="/static/app.js?v=image-check-update" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=update-progress">
+  <script src="/static/app.js?v=update-progress" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -109,6 +109,19 @@
             <p id="update-error" class="error-text" role="alert"></p>
             <div class="dialog-actions"><button id="update-cancel" class="secondary-button" type="button">Abbrechen</button><button id="update-submit" class="primary-button" type="submit">Jetzt aktualisieren</button></div>
           </form>
+        </dialog>
+
+        <dialog id="update-progress-dialog" class="backup-dialog update-progress-dialog" aria-labelledby="update-progress-title" aria-describedby="update-progress-detail">
+          <div class="update-progress-heading">
+            <span id="update-progress-spinner" class="update-spinner" aria-hidden="true"></span>
+            <span id="update-progress-success" class="update-success-icon" aria-hidden="true" hidden>✓</span>
+            <span id="update-progress-failure" class="update-failure-icon" aria-hidden="true" hidden>!</span>
+            <div><h2 id="update-progress-title" aria-live="polite">KIBM-Update wird gestartet</h2><p id="update-progress-detail">Die bestätigte Version wird vorbereitet.</p></div>
+          </div>
+          <div id="update-progress-track" class="update-progress-track" role="progressbar" aria-label="KIBM-Update läuft"><span></span></div>
+          <p class="update-power-warning"><strong>Wichtig: Den Raspberry Pi eingeschaltet lassen.</strong> Während der Installation keine Backup-Aktion starten und dieses Fenster geöffnet lassen.</p>
+          <p id="update-progress-note" class="update-progress-note">GitHub-Version wird geladen und geprüft.</p>
+          <div class="dialog-actions"><button id="update-progress-close" class="secondary-button" type="button" hidden>Schließen</button><button id="update-progress-reload" class="primary-button" type="button" hidden>Seite neu laden</button></div>
         </dialog>
 
         <section class="section-head"><div><h2>System</h2></div><span class="section-note">GERÄT & SOFTWARE</span></section>

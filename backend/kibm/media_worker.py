@@ -70,6 +70,12 @@ def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=timeout)
 
 
+def _ensure_update_idle() -> None:
+    state = _run(["systemctl", "show", "kibm-update.service", "--property=ActiveState", "--value"], timeout=10).stdout.strip()
+    if state in {"active", "activating", "deactivating"}:
+        raise ValueError("KIBM wird gerade aktualisiert. Bitte warte, bis der Vorgang abgeschlossen ist.")
+
+
 def _disk_size(path: str) -> int:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
@@ -588,6 +594,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
 
     def _start_existing(self, request: dict[str, Any]) -> None:
         global _job
+        _ensure_update_idle()
         with _lock:
             if _job and (_job.state in BUSY_STATES or _job.active_downloads):
                 raise ValueError("Auf dem USB-Stick läuft bereits ein Auftrag oder Download.")
@@ -608,6 +615,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
 
     def _start(self, request: dict[str, Any]) -> None:
         global _job
+        _ensure_update_idle()
         if request.get("confirmed") is not True:
             raise ValueError("Bestätige zuerst, dass der USB-Stick vollständig formatiert werden darf.")
         path = request.get("device_path")
@@ -641,6 +649,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
             self._reply({"job": _job_data(job)})
 
     def _download(self, request: dict[str, Any]) -> None:
+        _ensure_update_idle()
         name = request.get("filename")
         if not isinstance(name, str) or Path(name).name != name:
             raise ValueError("Ungültiger Dateiname.")
@@ -670,6 +679,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 job.active_downloads -= 1
 
     def _eject(self, request: dict[str, Any]) -> None:
+        _ensure_update_idle()
         with _lock:
             if not _job or _job.job_id != request.get("job_id"):
                 raise ValueError("USB-Auftrag nicht gefunden.")

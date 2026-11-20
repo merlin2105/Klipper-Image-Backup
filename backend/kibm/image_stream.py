@@ -43,6 +43,15 @@ class ImageJob:
     download_claimed: bool = False
 
 
+def has_active_job() -> bool:
+    cutoff = time.time() - JOB_TTL_SECONDS
+    with _lock:
+        return any(
+            job.created_at >= cutoff and job.state in {"bereit", "streaming"}
+            for job in _jobs.values()
+        )
+
+
 def _device_size(fd: int) -> int:
     value = bytearray(8)
     fcntl.ioctl(fd, BLOCKGETSIZE64, value, True)

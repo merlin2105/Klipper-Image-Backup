@@ -126,3 +126,24 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 .update-panel p { margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.6; }
 .update-panel .secondary-button { flex:none; }
 @media(max-width:680px){.update-panel{align-items:stretch;flex-direction:column;margin:12px 0 22px;padding:16px}.update-panel .secondary-button{width:100%}}
+.update-progress-dialog{width:min(560px,calc(100vw - 32px))}
+.update-progress-heading{display:flex;align-items:flex-start;gap:14px}
+.update-progress-heading>div{display:grid;gap:7px}
+.update-progress-heading p{font-size:13px;line-height:1.65}
+.update-spinner,.update-success-icon,.update-failure-icon{display:grid;place-items:center;width:28px;height:28px;flex:none;margin-top:1px}
+.update-spinner{border:3px solid #465246;border-top-color:var(--acid);border-radius:50%;animation:update-spin .9s linear infinite}
+.update-success-icon,.update-failure-icon{border:1px solid #647c4b;border-radius:50%;background:#293526;color:var(--acid);font-size:18px;font-weight:700}
+.update-failure-icon{border-color:#805148;background:#382622;color:#f1937d}
+.update-progress-track{height:6px;margin:22px 0 16px;border-radius:4px;background:#303a34;overflow:hidden}
+.update-progress-track span{display:block;width:38%;height:100%;border-radius:4px;background:var(--acid);animation:update-progress-sweep 1.6s ease-in-out infinite}
+.update-progress-track[hidden],.update-spinner[hidden],.update-success-icon[hidden],.update-failure-icon[hidden]{display:none}
+.update-progress-dialog[data-state="success"] .update-progress-track span{width:100%;animation:none}
+.update-power-warning{padding:12px 13px;border:1px solid #6a5835;border-radius:5px;background:#29271f;color:#e4c676!important;font-size:13px!important;line-height:1.6!important}
+.update-power-warning strong{color:#f0d88f}
+.update-progress-note{margin-top:12px!important}
+.update-progress-dialog .dialog-actions{margin-top:19px}
+.update-progress-dialog .dialog-actions button{min-height:40px}
+@keyframes update-spin{to{transform:rotate(360deg)}}
+@keyframes update-progress-sweep{0%{transform:translateX(-110%)}100%{transform:translateX(290%)}}
+@media(prefers-reduced-motion:reduce){.update-spinner,.update-progress-track span{animation-duration:4s}}
+@media(max-width:680px){.update-progress-dialog{padding:19px}.update-progress-heading{gap:11px}.update-progress-dialog .dialog-actions{flex-direction:column-reverse}.update-progress-dialog .dialog-actions button{width:100%}}

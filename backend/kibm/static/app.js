@@ -14,6 +14,7 @@ let usbScanInProgress = false;
 let usbImages = [];
 let imageScanInProgress = false;
 let updatePoll = null;
+const UPDATE_TARGET_KEY = "kibm-update-target";
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -21,7 +22,11 @@ async function api(path, options = {}) {
   if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(body.detail || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -191,6 +196,50 @@ function renderExistingImages(images) {
   updateDestination();
 }
 
+function scheduleUpdatePoll(delay = 3000) {
+  window.clearTimeout(updatePoll);
+  updatePoll = window.setTimeout(refreshUpdateStatus, delay);
+}
+
+function setUpdateProgress(state, note = "") {
+  const dialog = $("update-progress-dialog");
+  const running = state === "running" || state === "restarting";
+  dialog.dataset.state = state;
+  $("update-progress-spinner").hidden = !running;
+  $("update-progress-success").hidden = state !== "success";
+  $("update-progress-failure").hidden = state !== "failed";
+  $("update-progress-track").hidden = !running;
+  $("update-progress-close").hidden = state !== "failed";
+  $("update-progress-reload").hidden = state !== "success";
+  $("update-progress-title").textContent = state === "success"
+    ? "Update erfolgreich installiert"
+    : state === "failed" ? "Update fehlgeschlagen" : "KIBM-Update läuft";
+  $("update-progress-detail").textContent = state === "success"
+    ? "Die neue Version ist installiert und KIBM meldet wieder Bereitschaft. Lade die Seite jetzt neu."
+    : state === "failed"
+      ? "Der Installer hat das Update nicht abgeschlossen. Öffne die Logs zur Fehlerdiagnose."
+      : state === "restarting"
+        ? "Die KIBM-Dienste starten neu. Die Verbindung kann kurz unterbrochen sein."
+        : "Die bestätigte GitHub-Version wird geladen, geprüft und installiert.";
+  $("update-progress-note").textContent = note || (state === "running"
+    ? "Installation läuft. Bitte dieses Fenster geöffnet lassen."
+    : state === "restarting" ? "Warte auf die Bereitschaftsmeldung des Pis …" : "");
+}
+
+function openUpdateProgress(targetCommit) {
+  if (targetCommit) sessionStorage.setItem(UPDATE_TARGET_KEY, targetCommit);
+  $("dashboard-content").setAttribute("aria-busy", "true");
+  const dialog = $("update-progress-dialog");
+  if (!dialog.open) dialog.showModal();
+  setUpdateProgress("running");
+}
+
+function closeUpdateProgress() {
+  sessionStorage.removeItem(UPDATE_TARGET_KEY);
+  $("dashboard-content").removeAttribute("aria-busy");
+  $("update-progress-dialog").close();
+}
+
 async function refreshUpdateStatus() {
   try {
     const status = await api("/api/update", { signal: AbortSignal.timeout(7000) });
@@ -200,11 +249,32 @@ async function refreshUpdateStatus() {
     panel.hidden = false;
     button.hidden = !status.can_update || worker.state === "running";
     button.disabled = worker.state === "running";
+    let targetCommit = sessionStorage.getItem(UPDATE_TARGET_KEY);
+    if (!targetCommit && worker.state === "running" && status.latest_commit?.sha) {
+      targetCommit = status.latest_commit.sha;
+      openUpdateProgress(targetCommit);
+    }
+    if (targetCommit) {
+      openUpdateProgress(targetCommit);
+      if (worker.state === "failed") {
+        sessionStorage.removeItem(UPDATE_TARGET_KEY);
+        $("dashboard-content").removeAttribute("aria-busy");
+        setUpdateProgress("failed", `Installer-Status ${worker.exit_status || "unbekannt"}. Logs: sudo kibm-admin logs.`);
+      } else if (status.current_commit === targetCommit && worker.state !== "running") {
+        setUpdateProgress("success", `Installierter Commit ${targetCommit.slice(0, 8)}.`);
+      } else {
+        const restarting = worker.state !== "running";
+        setUpdateProgress(restarting ? "restarting" : "running", restarting
+          ? "Der Pi arbeitet weiter; die Oberfläche wartet auf den Abschluss."
+          : "GitHub-Version wird geladen und installiert. Bitte Pi eingeschaltet lassen.");
+        scheduleUpdatePoll(2500);
+      }
+      return;
+    }
     if (worker.state === "running") {
       $("update-title").textContent = "Update wird installiert";
       $("update-detail").textContent = "KIBM lädt die GitHub-Version und startet die Dienste neu. Diese Seite kann kurz nicht erreichbar sein.";
-      window.clearTimeout(updatePoll);
-      updatePoll = window.setTimeout(refreshUpdateStatus, 3000);
+      scheduleUpdatePoll();
     } else if (worker.state === "failed") {
       $("update-title").textContent = "Letztes Update fehlgeschlagen";
       $("update-detail").textContent = `Der Installer wurde mit Status ${worker.exit_status || "unbekannt"} beendet. Logs: sudo kibm-admin logs.`;
@@ -228,12 +298,18 @@ async function refreshUpdateStatus() {
       $("update-detail").textContent = `Installiert: ${(status.current_commit || "unbekannt").slice(0, 8)} · GitHub: ${status.latest_commit.sha.slice(0, 8)}.`;
     }
   } catch {
+    const targetCommit = sessionStorage.getItem(UPDATE_TARGET_KEY);
+    if (targetCommit) {
+      openUpdateProgress(targetCommit);
+      setUpdateProgress("restarting", "KIBM startet seine Dienste neu. Die Verbindung wird automatisch wieder geprüft.");
+      scheduleUpdatePoll(3000);
+      return;
+    }
     $("update-panel").hidden = false;
     $("update-button").hidden = true;
     $("update-title").textContent = "Update-Status nicht verfügbar";
     $("update-detail").textContent = "KIBM versucht die Versionsprüfung erneut.";
-    window.clearTimeout(updatePoll);
-    updatePoll = window.setTimeout(refreshUpdateStatus, 10000);
+    scheduleUpdatePoll(10000);
   }
 }
 
@@ -464,6 +540,7 @@ $("update-form").addEventListener("submit", async (event) => {
   const submit = $("update-submit");
   submit.disabled = true;
   $("update-error").textContent = "";
+  let progressOpened = false;
   try {
     if (!csrfToken) {
       const login = await api("/api/login", {
@@ -473,17 +550,49 @@ $("update-form").addEventListener("submit", async (event) => {
       csrfToken = login.csrf_token;
       $("update-password").value = "";
     }
-    await api("/api/update", { method: "POST", body: JSON.stringify({ confirmed: true }) });
+    const status = await api("/api/update");
+    if (!status.can_update || !status.latest_commit?.sha) throw new Error("Es ist kein startbereites Update verfügbar. Prüfe den Status erneut.");
     $("update-dialog").close();
-    $("update-title").textContent = "Update wird gestartet …";
-    $("update-detail").textContent = "KIBM lädt die bestätigte Version von GitHub.";
+    openUpdateProgress(status.latest_commit.sha);
+    progressOpened = true;
+    try {
+      await api("/api/update", { method: "POST", body: JSON.stringify({ confirmed: true }) });
+    } catch (error) {
+      if (!error.status) {
+        setUpdateProgress("restarting", "Der Pi hat den Start möglicherweise bereits angenommen. Ich prüfe den Update-Status weiter.");
+        scheduleUpdatePoll(1500);
+        return;
+      }
+      throw error;
+    }
+    setUpdateProgress("running", "Der Pi hat das Update angenommen. Bitte eingeschaltet lassen.");
     $("update-button").hidden = true;
-    window.setTimeout(refreshUpdateStatus, 1500);
+    scheduleUpdatePoll(1500);
   } catch (error) {
+    if (progressOpened) {
+      sessionStorage.removeItem(UPDATE_TARGET_KEY);
+      $("dashboard-content").removeAttribute("aria-busy");
+      $("update-progress-dialog").close();
+      $("update-dialog").showModal();
+    }
     $("update-error").textContent = error.message;
   } finally {
     submit.disabled = false;
   }
+});
+
+$("update-progress-dialog").addEventListener("cancel", (event) => {
+  if (sessionStorage.getItem(UPDATE_TARGET_KEY)) event.preventDefault();
+});
+
+$("update-progress-close").addEventListener("click", () => {
+  closeUpdateProgress();
+  refreshUpdateStatus();
+});
+
+$("update-progress-reload").addEventListener("click", () => {
+  closeUpdateProgress();
+  window.location.reload();
 });
 
 $("start-backup").addEventListener("click", async () => {
