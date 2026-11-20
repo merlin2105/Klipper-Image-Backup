@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+const formatLocale = () => window.KIBM_I18N?.formatLocale || "de-DE";
 const USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024;
 let csrfToken = "";
 let readiness = null;
@@ -24,7 +25,8 @@ async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body.detail || `HTTP ${response.status}`);
+    const detail = body.detail || `HTTP ${response.status}`;
+    const error = new Error(window.KIBM_I18N?.translate(detail) || detail);
     error.status = response.status;
     throw error;
   }
@@ -37,7 +39,7 @@ function formatBytes(value) {
   let size = value;
   let unit = 0;
   while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
-  return `${size.toLocaleString("de-DE", { maximumFractionDigits: 1 })} ${units[unit]}`;
+  return `${size.toLocaleString(formatLocale(), { maximumFractionDigits: 1 })} ${units[unit]}`;
 }
 
 function renderMetricMeter(id, percent) {
@@ -55,7 +57,7 @@ async function refreshSystemMetrics() {
   }
 
   const unavailable = "Nicht verfügbar";
-  const number = value => value.toLocaleString("de-DE", { maximumFractionDigits: 1 });
+  const number = value => value.toLocaleString(formatLocale(), { maximumFractionDigits: 1 });
   const cpu = metrics.cpu_percent;
   $("cpu-usage").textContent = Number.isFinite(cpu) ? `${number(cpu)} %` : unavailable;
   renderMetricMeter("cpu", cpu);
@@ -74,7 +76,9 @@ async function refreshSystemMetrics() {
     const days = Math.floor(uptime / 86400);
     const hours = Math.floor(uptime / 3600) % 24;
     const minutes = Math.floor(uptime / 60) % 60;
-    $("system-uptime").textContent = days ? `${days} T ${hours} Std` : `${hours} Std ${minutes} Min`;
+    $("system-uptime").textContent = window.KIBM_I18N?.language === "en"
+      ? (days ? `${days} d ${hours} h` : `${hours} h ${minutes} min`)
+      : (days ? `${days} T ${hours} Std` : `${hours} Std ${minutes} Min`);
   } else {
     $("system-uptime").textContent = unavailable;
   }
@@ -117,7 +121,7 @@ async function loadDashboard() {
     await loadUsbDevices();
     updateDestination();
     refreshUpdateStatus();
-    $("footer-time").textContent = `AKTUALISIERT ${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+    $("footer-time").textContent = `AKTUALISIERT ${new Date().toLocaleTimeString(formatLocale(), { hour: "2-digit", minute: "2-digit" })}`;
   } catch (error) {
     showError(error.message);
   }
@@ -428,7 +432,7 @@ function updateDestination() {
     || (usbMode && (!device || targetTooSmall || !$("format-confirm").checked));
   let capacityMessage = "";
   if (targetTooSmall) {
-    const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString("de-DE", { maximumFractionDigits: 2 })} GiB`;
+    const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString(formatLocale(), { maximumFractionDigits: 2 })} GiB`;
     capacityMessage = `Zu wenig Platz: Der Stick hat ${gib(device.size_bytes)}. Diese Auswahl benötigt rund ${gib(minimumUsbBytes)}.`;
     if (shrink) capacityMessage += " PiShrink braucht während der Verarbeitung Platz für zwei vollständige Kopien plus Reserve.";
     capacityMessage += shrink && device.size_bytes >= requiredUsbCapacity(false)
@@ -460,7 +464,11 @@ function renderPrinter(printer) {
   $("printer-icon-path").setAttribute("d", isReady ? "m5 12 4 4L19 6" : isActive ? "M8 5v14m8-14v14" : "M12 7v6m0 4h.01");
   $("printer-title").textContent = isReady ? "Bereit" : isActive ? "Druckauftrag aktiv" : "Status unbekannt";
   $("printer-description").textContent = printer.message;
-  $("printer-state").textContent = (printer.state || "UNBEKANNT").toUpperCase();
+  const state = (printer.state || "UNBEKANNT").toLowerCase();
+  const states = window.KIBM_I18N?.language === "en"
+    ? { idle: "IDLE", standby: "STANDBY", printing: "PRINTING", paused: "PAUSED", complete: "COMPLETE", cancelled: "CANCELLED", error: "ERROR", unknown: "UNKNOWN" }
+    : { idle: "LEERLAUF", standby: "STANDBY", printing: "DRUCKT", paused: "PAUSIERT", complete: "ABGESCHLOSSEN", cancelled: "ABGEBROCHEN", error: "FEHLER", unknown: "UNBEKANNT" };
+  $("printer-state").textContent = states[state] || state.toUpperCase();
   $("restart-safety").textContent = `BACKUP: ${isActive ? "GESPERRT" : printer.classification === "unknown" ? "BESTÄTIGUNG NÖTIG" : "BEREIT"}`;
 }
 
@@ -710,7 +718,7 @@ $("update-form").addEventListener("submit", async (event) => {
       $("update-dialog").showModal();
     }
     $("update-error").textContent = error.message;
-    if (/USB-Stick.*auswerfen/i.test(error.message)) $("update-eject").hidden = false;
+    if (/USB-Stick.*auswerfen|safely eject the USB drive/i.test(error.message)) $("update-eject").hidden = false;
   } finally {
     submit.disabled = false;
   }
@@ -843,7 +851,7 @@ $("backup-form").addEventListener("submit", async (event) => {
   } catch (error) {
     $("pi-password").value = "";
     $("backup-login-error").textContent = error.message;
-    if (error.message.includes("Pi-Kontos")) csrfToken = "";
+    if (error.status === 401) csrfToken = "";
   } finally {
     submit.disabled = false;
   }
@@ -887,7 +895,7 @@ async function pollTransfer() {
     transferPoll = window.setTimeout(pollTransfer, 1000);
   } catch (error) {
     $("backup-progress-title").textContent = "Status nicht erreichbar";
-    if (error.message.includes("Pi-Konto")) {
+    if (error.status === 401) {
       $("backup-progress-detail").textContent = "Die Sitzung ist abgelaufen. Prüfe den Downloadstatus im Browser und lade die Seite bei Bedarf neu.";
       activeJobId = null;
       renderReadiness(readiness);
@@ -1005,6 +1013,19 @@ $("usb-eject").addEventListener("click", async () => {
   }
 });
 
+window.addEventListener("kibm:languagechange", async () => {
+  const selectedPath = $("usb-device").value;
+  $("usb-device").replaceChildren(new Option("USB-Stick auswählen", ""));
+  for (const device of usbDevices) {
+    const detail = device.model?.trim() || device.path;
+    $("usb-device").append(new Option(`${detail} · ${formatBytes(device.size_bytes)}`, device.path));
+  }
+  if (usbDevices.some((device) => device.path === selectedPath)) $("usb-device").value = selectedPath;
+  renderExistingImages(usbImages);
+  renderUsbDetection();
+  await loadDashboard();
+  refreshSystemMetrics();
+});
 loadDashboard();
 pollSystemMetrics();
 window.setInterval(() => {

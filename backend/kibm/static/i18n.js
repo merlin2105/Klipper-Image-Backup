@@ -1,0 +1,513 @@
+(() => {
+  const translations = {
+    "KIBM · Systemübersicht": "KIBM · System overview",
+    "Klipper Image Backup": "Klipper Image Backup",
+    "Systemdiagnose und vollständige Sicherungen deiner Klipper-microSD. Die Systemkarte bleibt unverändert.": "System diagnostics and full backups of your Klipper microSD. The system card remains unchanged.",
+    "SYSTEMKARTE BLEIBT": "SYSTEM CARD UNCHANGED",
+    "USB-Ziel nur nach Auswahl": "USB target only after selection",
+    "Status wird geladen": "Loading status",
+    "Systemdaten werden abgefragt.": "Loading system information.",
+    "KLIPPER HOST": "KLIPPER HOST",
+    "Gesamtstatus": "Overall status",
+    "GitHub-Version wird geprüft …": "Checking GitHub version …",
+    "KIBM fragt den aktuellen Stand von GitHub ab.": "KIBM is checking the latest version on GitHub.",
+    "Auf Update prüfen": "Check for updates",
+    "Update installieren": "Install update",
+    "Backup-Bereitschaft": "Backup readiness",
+    "DIAGNOSE": "DIAGNOSTICS",
+    "Image der System-microSD": "System microSD image",
+    "Wähle, ob KIBM das vollständige Karten-Image direkt an den PC streamt oder auf einem USB-Stick sichert.": "Choose whether KIBM streams the full card image to your PC or saves it to a USB drive.",
+    "Druckerstatus": "Printer status",
+    "wird geprüft": "checking",
+    "System-microSD": "System microSD",
+    "Leserechte": "Read access",
+    "Live-Abbild:": "Live image:",
+    " Der Pi bleibt eingeschaltet. Wenn Moonraker erreichbar ist, bricht KIBM bei einem laufenden Druck ab. Ohne Moonraker-Verbindung ist keine Live-Prüfung möglich; bestätige dann nur, wenn sicher kein Druck läuft oder startet. Andere Systemdaten können sich währenddessen ändern.": " The Pi stays on. If Moonraker is reachable, KIBM stops the backup when a print is running. Without Moonraker, it cannot check print status; continue only when you are sure no print is running or about to start. Other system data may change during the backup.",
+    "PC · Vollständiges Image": "PC · Full image",
+    "Im Browser speichern": "Save in browser",
+    "Information zur PC-Sicherung": "Information about PC backup",
+    "KIBM liest die gesamte System-microSD und überträgt ein vollständiges Image an deinen Browser. Der Browser fragt, wo die Datei gespeichert werden soll. Es wird nichts auf dem Pi oder einem USB-Stick gespeichert.": "KIBM reads the entire system microSD and transfers a full image to your browser. Your browser asks where to save the file. Nothing is saved on the Pi or a USB drive.",
+    "USB-Stick · Sicherung": "USB drive · Backup",
+    "Direkt am Raspberry Pi speichern": "Save directly on the Raspberry Pi",
+    "Information zur USB-Sicherung": "Information about USB backup",
+    "Dieser Weg speichert das Karten-Image direkt auf einem am Raspberry Pi angeschlossenen USB-Stick. KIBM muss den Stick dafür formatieren; dabei werden alle vorhandenen Daten auf dem ausgewählten Stick gelöscht. Ohne erkannten Stick ist diese Auswahl deaktiviert.": "This saves the card image directly to a USB drive connected to the Raspberry Pi. KIBM must format the drive, which erases all data on the selected drive. This option is disabled until a drive is detected.",
+    "Image auf USB-Stick": "Image on USB drive",
+    "Vorhandenes Image prüfen, verkleinern oder löschen": "Inspect, shrink or delete an existing image",
+    "Information zum vorhandenen USB-Image": "Information about the existing USB image",
+    "Diese Auswahl erscheint nur, wenn KIBM auf dem USB-Stick eine .img-Datei findet. KIBM untersucht den Image-Inhalt unabhängig vom Dateinamen. Ein verkleinertes Image wird als kompakt erkannt. Du kannst eine verkleinerbare Datei bearbeiten oder die ausgewählte Image-Datei nach Bestätigung löschen.": "This option appears when KIBM finds an .img file on the USB drive. KIBM checks the image contents regardless of its filename and detects images that are already compact. You can shrink an eligible image or delete the selected image after confirmation.",
+    "Der Browser speichert das vollständige Image im gewünschten Ordner. Plane Platz für die gesamte microSD ein.": "Your browser saves the full image in the selected folder. Make sure there is enough space for the entire microSD.",
+    "Erkannter USB-Stick": "Detected USB drive",
+    "USB-Stick auswählen": "Select a USB drive",
+    "Erneut suchen": "Scan again",
+    "Image nach der vollständigen Sicherung mit PiShrink verkleinern": "Shrink the full backup with PiShrink",
+    "Der Shrink läuft auf dem Pi an der Image-Datei auf dem USB-Stick.": "PiShrink runs on the Pi using the image file on the USB drive.",
+    "Vollständiges Image zusätzlich behalten": "Keep the full image too",
+    "Wenn nicht aktiviert, wird das Voll-Image erst nach erfolgreichem Shrink gelöscht.": "If unchecked, the full image is deleted only after shrinking succeeds.",
+    "Image nach Sicherung prüfen": "Verify image after backup",
+    "KIBM liest das vollständige Image erneut und vergleicht seine SHA-256-Prüfsumme.": "KIBM reads the full image again and compares its SHA-256 checksum.",
+    "USB-Stick wird als exFAT formatiert.": "The USB drive will be formatted as exFAT.",
+    " Vorhandene Daten auf dem ausgewählten Stick werden gelöscht. exFAT ermöglicht die Nutzung unter Windows, macOS und Linux.": " All data on the selected drive will be erased. exFAT works with Windows, macOS and Linux.",
+    "Gefundene Images auf dem USB-Stick": "Images found on the USB drive",
+    "Image auswählen": "Select an image",
+    "KIBM prüft Dateisystem und Partitionsgrößen unabhängig vom Dateinamen.": "KIBM checks the filesystem and partition sizes regardless of the filename.",
+    "PiShrink erstellt eine verkleinerte Kopie auf demselben Stick. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.": "PiShrink creates a smaller copy on the same drive. There must be enough free space for a full working copy.",
+    "Ausgewähltes Image löschen": "Delete selected image",
+    "Nur die ausgewählte .img-Datei wird gelöscht.": "Only the selected .img file will be deleted.",
+    "Ich bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status erfolgt keine automatische Druckprüfung.": "I confirm that no print is running or will start during the backup. If Moonraker is unavailable, print status cannot be checked automatically.",
+    "Ich habe den ausgewählten USB-Stick geprüft. KIBM darf ihn vollständig löschen und als exFAT formatieren.": "I have checked the selected USB drive. KIBM may erase it completely and format it as exFAT.",
+    "Image erstellen": "Create image",
+    "Voraussetzungen erneut prüfen": "Check prerequisites again",
+    "Übertragung wird vorbereitet": "Preparing transfer",
+    "Datei im Browser speichern": "Save file in browser",
+    "USB-Stick sicher auswerfen": "Safely eject USB drive",
+    "Mit deinem Pi-Konto anmelden": "Sign in with your Pi account",
+    "Verwende das vorhandene Passwort deines Linux-Kontos. Es wird nicht geändert oder von KIBM gespeichert.": "Use your existing Linux account password. It will not be changed or stored by KIBM.",
+    "Bestehendes Pi-Passwort": "Current Pi password",
+    "Abbrechen": "Cancel",
+    "Image herunterladen": "Download image",
+    "Image-Datei löschen?": "Delete image file?",
+    "Nur diese .img-Datei wird vom USB-Stick entfernt. Dieser Schritt kann nicht rückgängig gemacht werden.": "Only this .img file will be removed from the USB drive. This cannot be undone.",
+    "Image löschen": "Delete image",
+    "KIBM aktualisieren?": "Update KIBM?",
+    "Die aktuelle Version wird von GitHub geladen. KIBM startet während des Updates kurz neu.": "The current version will be downloaded from GitHub. KIBM will briefly restart during the update.",
+    "Jetzt aktualisieren": "Update now",
+    "KIBM-Update wird gestartet": "Starting KIBM update",
+    "Die bestätigte Version wird vorbereitet.": "Preparing the confirmed version.",
+    "Wichtig: Den Raspberry Pi eingeschaltet lassen.": "Important: Keep the Raspberry Pi powered on.",
+    " Während der Installation keine Backup-Aktion starten und dieses Fenster geöffnet lassen.": " Do not start a backup during installation, and keep this window open.",
+    "GitHub-Version wird geladen und geprüft.": "Downloading and checking the GitHub version.",
+    "Schließen": "Close",
+    "Seite neu laden": "Reload page",
+    "SYSTEM": "SYSTEM",
+    "GERÄT & SOFTWARE": "DEVICE & SOFTWARE",
+    "Wird erkannt …": "Detecting …",
+    "Betriebssystem": "Operating system",
+    "Kernel": "Kernel",
+    "Architektur": "Architecture",
+    "Aktuelle Auslastung": "Current usage",
+    "CPU": "CPU",
+    "Arbeitsspeicher": "Memory",
+    "CPU-Temperatur": "CPU temperature",
+    "Laufzeit": "Uptime",
+    "MOONRAKER": "MOONRAKER",
+    "Moonraker-Status wird abgefragt.": "Checking Moonraker status.",
+    "UNBEKANNT": "UNKNOWN",
+    "Nicht verfügbar": "Unavailable",
+    "Status unbekannt": "Status unknown",
+    "NICHT ERKANNT": "NOT DETECTED",
+    "ERKANNT": "DETECTED",
+    "BESTÄTIGUNG NÖTIG": "CONFIRMATION REQUIRED",
+    "BACKUP: BESTÄTIGUNG NÖTIG": "BACKUP: CONFIRMATION REQUIRED",
+    "Druckerstatus ist unbekannt; manuelle Bestätigung erforderlich.": "Printer status is unknown; manual confirmation is required.",
+    "Drucker bereit.": "Printer ready.",
+    "BACKUP: GESPERRT": "BACKUP: BLOCKED",
+    "Speicher": "Storage",
+    "BLOCKGERÄTE & PARTITIONEN": "BLOCK DEVICES & PARTITIONS",
+    "PRÜFUNG": "CHECKING",
+    "Belegung des Systems": "System usage",
+    "Belegt": "Used",
+    "Frei": "Free",
+    "Vollständige Imagegröße": "Full image size",
+    "Wird mit dem Systemlaufwerk ermittelt": "Reading system drive",
+    "ROH-IMAGE": "RAW IMAGE",
+    "Partitionen": "Partitions",
+    "GERÄT": "DEVICE",
+    "DATEISYSTEM": "FILESYSTEM",
+    "GRÖSSE": "SIZE",
+    "EINHÄNGEPUNKT": "MOUNT POINT",
+    "Partitionen werden geladen …": "Loading partitions …",
+    "Automatische Partitionserkennung · Nur lesend · Auf dem Smartphone seitlich wischen": "Automatic partition detection · Read-only · Swipe sideways on a phone",
+    "Erstellt für sichere Klipper-Backups": "Made for safe Klipper backups",
+    "Gesamtstatus": "Overall status",
+    "Sprache": "Language",
+    "Deutsch": "German",
+    "English": "English",
+    "Systemprüfung nicht vollständig": "System check incomplete",
+    "Diagnose aktiv · Systemkarte geschützt": "Diagnostics active · System card protected",
+    "Kein Druckerstatus verfügbar · Backup nach Bestätigung möglich · vollständige System-microSD erkannt.": "Printer status unavailable · backup possible after confirmation · full system microSD detected.",
+    "Drucker im Standby · vollständige System-microSD erkannt.": "Printer is idle · full system microSD detected.",
+    "Druckerstatus": "Printer status",
+    "Druck aktiv · gesperrt": "Print active · blocked",
+    "nicht verfügbar · Bestätigung nötig": "unavailable · confirmation required",
+    "Standby": "Idle",
+    "unterstützt": "supported",
+    "nicht unterstützt": "unsupported",
+    "bereit": "ready",
+    "fehlen": "missing",
+    "Größe nicht verfügbar": "Size unavailable",
+    "BEREIT": "READY",
+    "GESPERRT": "BLOCKED",
+    "Kein Druckerstatus verfügbar. Starte nur, wenn sicher kein Druck läuft; die Bestätigung ist erforderlich.": "Printer status is unavailable. Continue only when you are sure no print is running; confirmation is required.",
+    "USB-Stick auswählen": "Select a USB drive",
+    "USB-Erkennung nicht verfügbar": "USB detection unavailable",
+    "Image verkleinern": "Shrink image",
+    "Systemlaufwerk unbekannt": "System drive unknown",
+    "Modell nicht gemeldet": "Model not reported",
+    "Systemlaufwerk nicht erkannt": "System drive not detected",
+    "Keine Partitionen erkannt.": "No partitions detected.",
+    "Prüfung läuft …": "Checking …",
+    "Prüfe GitHub …": "Checking GitHub …",
+    "Das ausgewählte Image ist nicht mehr verfügbar. Scanne den Stick erneut.": "The selected image is no longer available. Scan the drive again.",
+    "Gib zuerst dein bestehendes Pi-Passwort ein.": "Enter your current Pi password first.",
+    "USB-Stick sicher ausgeworfen. Du kannst das Update jetzt starten.": "USB drive safely ejected. You can start the update now.",
+    "Es ist kein startbereites Update verfügbar. Prüfe den Status erneut.": "No update is ready to install. Check the status again.",
+    "Der Pi hat den Start möglicherweise bereits angenommen. Ich prüfe den Update-Status weiter.": "The Pi may have accepted the update request. Checking its status…",
+    "Der Pi hat das Update angenommen. Bitte eingeschaltet lassen.": "The Pi accepted the update. Keep it powered on.",
+    "Image-Erstellung bestätigen": "Confirm image creation",
+    "USB-Image erstellen": "Create USB image",
+    "Bitte zuerst einen USB-Stick auswählen.": "Select a USB drive first.",
+    "Bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status ist keine automatische Druckprüfung möglich. Für die PC-Sicherung wird die vollständige Karte übertragen.": "Confirm that no print is running or will start during the backup. If Moonraker is unavailable, print status cannot be checked automatically. PC backup transfers the full card.",
+    "Prüfe Speicherziel und Bestätigungen erneut.": "Check the backup destination and confirmations again.",
+    "USB-Auftrag gestartet": "USB job started",
+    "Download bereit": "Download ready",
+    "Image wird übertragen": "Transferring image",
+    "Übertragung vollständig": "Transfer complete",
+    "Image unvollständig": "Image incomplete",
+    "Die Übertragung wurde nicht vollständig abgeschlossen.": "The transfer did not complete.",
+    "Status nicht erreichbar": "Status unavailable",
+    "Die Sitzung ist abgelaufen. Prüfe den Downloadstatus im Browser und lade die Seite bei Bedarf neu.": "Your session expired. Check the browser download status and reload the page if needed.",
+    "Vollständiges Image wird auf USB gesichert": "Saving full image to USB",
+    "Image wird auf dem Pi verkleinert": "Shrinking image on the Pi",
+    "Image auf dem USB-Stick wird geprüft": "Verifying image on USB drive",
+    "USB-Stick wird vorbereitet": "Preparing USB drive",
+    "Image auf USB bereit": "Image ready on USB",
+    "Fertig": "Done",
+    "Verkleinern fehlgeschlagen": "Image shrinking failed",
+    "USB-Sicherung fehlgeschlagen": "USB backup failed",
+    "Fehler": "Error",
+    "Der Shrink ist fehlgeschlagen. Das vollständige Image ist erhalten.": "Shrinking failed. The full image is preserved.",
+    "USB-Ziel wird geprüft": "Checking USB destination",
+    "Verkleinertes Image": "Shrunk image",
+    "Vollständiges Image": "Full image",
+    "Auf PC herunterladen": "Download to PC",
+    "USB-Stick sicher ausgeworfen. Du kannst ihn jetzt am PC, Mac oder Linux-Rechner anschließen.": "USB drive safely ejected. You can now connect it to a PC, Mac or Linux computer.",
+    "Installiert": "Installed",
+    "Versionsnummer nicht abrufbar": "Version number unavailable",
+    "unbekannt": "unknown",
+    "Versionprüfung läuft": "Checking for updates",
+    "Versionsprüfung läuft": "Checking for updates",
+    "Update wird installiert": "Installing update",
+    "Letztes Update fehlgeschlagen": "The last update failed",
+    "GitHub-Version derzeit nicht erreichbar": "GitHub version currently unavailable",
+    "Update vorhanden · Web-Updater nicht bereit": "Update available · web updater not ready",
+    "Update vorhanden": "Update available",
+    "KIBM ist aktuell": "KIBM is up to date",
+    "Versionsprüfung dauert noch": "Version check is taking longer than expected",
+    "KIBM lädt die GitHub-Version und startet die Dienste neu. Diese Seite kann kurz nicht erreichbar sein.": "KIBM is downloading the GitHub version and restarting its services. This page may be briefly unavailable.",
+    "Versionsnummer nicht abrufbar": "Version number unavailable",
+    "Diese Installation muss einmalig per SSH mit sudo kibm-admin update vorbereitet werden.": "This installation must be prepared once over SSH with sudo kibm-admin update.",
+    "lokale Änderungen erkannt": "local changes detected",
+    "Der Pi arbeitet weiter; die Oberfläche wartet auf den Abschluss.": "The Pi is still working; the interface is waiting for it to finish.",
+    "GitHub-Version wird geladen und installiert. Bitte Pi eingeschaltet lassen.": "Downloading and installing the GitHub version. Keep the Pi powered on.",
+    "KIBM startet seine Dienste neu. Die Verbindung wird automatisch wieder geprüft.": "KIBM is restarting its services. The connection will be checked again automatically.",
+    "KIBM-Update wird gestartet": "Starting KIBM update",
+    "Update erfolgreich installiert": "Update installed successfully",
+    "Update fehlgeschlagen": "Update failed",
+    "KIBM-Update läuft": "KIBM update in progress",
+    "Die neue Version ist installiert und KIBM meldet wieder Bereitschaft. Lade die Seite jetzt neu.": "The new version is installed and KIBM is ready again. Reload the page now.",
+    "Der Installer hat das Update nicht abgeschlossen. Öffne die Logs zur Fehlerdiagnose.": "The installer did not complete the update. Open the logs to diagnose the problem.",
+    "Die KIBM-Dienste starten neu. Die Verbindung kann kurz unterbrochen sein.": "KIBM services are restarting. The connection may be interrupted briefly.",
+    "Die bestätigte GitHub-Version wird geladen, geprüft und installiert.": "The confirmed GitHub version is being downloaded, checked and installed.",
+    "Installation läuft. Bitte dieses Fenster geöffnet lassen.": "Installation is in progress. Keep this window open.",
+    "Warte auf die Bereitschaftsmeldung des Pis …": "Waiting for the Pi to report that it is ready …",
+    "Installiert: ": "Installed: ",
+    "KIBM lädt die aktuelle Version von GitHub.": "KIBM is downloading the latest version from GitHub.",
+    "Automatischer erneuter Versuch in 10 Sekunden.": "Automatically retrying in 10 seconds.",
+    "Erneuter Versuch in 15 Sekunden.": "Retrying in 15 seconds.",
+    "erneuter Versuch in 3 Sekunden.": "retrying in 3 seconds.",
+    "möglichen Shrink-Spielraum. Die tatsächliche Ersparnis kann geringer sein; das Original bleibt erhalten.": "of potential shrink space. Actual savings may be lower; the original is preserved.",
+    "Das Image ist bereits kompakt oder bietet weniger als 256 MB geschätzten Shrink-Spielraum. Ein erneuter Shrink wird nicht angeboten.": "The image is already compact or has less than 256 MB of estimated shrink space. Shrinking it again is not offered.",
+    "Das Dateisystem konnte nicht sicher geprüft werden. KIBM bietet deshalb keinen Shrink an.": "The filesystem could not be checked safely, so KIBM will not offer to shrink it.",
+    "Zu wenig Platz: Der Stick hat ": "Not enough space: the drive has ",
+    ". Diese Auswahl benötigt rund ": ". This option needs about ",
+    " PiShrink braucht während der Verarbeitung Platz für zwei vollständige Kopien plus Reserve.": " PiShrink needs room for two full copies plus extra space while it works.",
+    " Entferne den Haken bei „Image … verkleinern“, um das vollständige Image auf diesem Stick zu sichern.": " Uncheck “Shrink image” to save the full image to this drive.",
+    " Wähle einen größeren Stick oder sichere das Image auf dem PC.": " Choose a larger drive or save the image to your PC.",
+    "USB-Erkennung nicht erreichbar. KIBM versucht es automatisch erneut.": "USB detection is unavailable. KIBM will retry automatically.",
+    "USB-Stick": "USB drive",
+    "Vor der Sicherung wird der Stick als exFAT formatiert; vorhandene Daten werden gelöscht.": "Before the backup, the drive will be formatted as exFAT and existing data will be erased.",
+    "Wähle den gewünschten Stick aus.": "Select the drive you want to use.",
+    "USB-Stick erkannt": "USB drive detected",
+    "USB-Sticks erkannt": "USB drives detected",
+    "noch ca. ": "about ",
+    " verkleinerbar": " shrinkable",
+    "bereits kompakt": "already compact",
+    "nicht sicher prüfbar": "cannot be checked safely",
+    "USB-Stick auswählen": "Select a USB drive",
+    "CPU-Auslastung": "CPU usage",
+    "Arbeitsspeicherauslastung": "Memory usage",
+    "Belegung des Root-Dateisystems": "Root filesystem usage",
+    "Partitionstabelle, auf schmalen Bildschirmen horizontal scrollbar": "Partition table; scroll horizontally on narrow screens",
+    "Systemlaufwerk konnte nicht eindeutig erkannt werden.": "The system drive could not be identified reliably.",
+    "Nur die interne microSD unter /dev/mmcblk0 wird derzeit unterstützt.": "Only the internal microSD at /dev/mmcblk0 is currently supported.",
+    "Die FAT-Bootpartition konnte nicht sicher erkannt werden.": "The FAT boot partition could not be identified safely.",
+    "Die ext4-Systempartition konnte nicht sicher erkannt werden.": "The ext4 system partition could not be identified safely.",
+    "Das erkannte Systemlaufwerk ist kein Blockgerät.": "The detected system drive is not a block device.",
+    "KIBM hat keinen lesenden Zugriff auf die System-microSD.": "KIBM does not have read access to the system microSD.",
+    "Pi password authentication is unavailable": "Pi password authentication is unavailable",
+    "GitHub ist derzeit nicht erreichbar.": "GitHub is currently unavailable.",
+    "Die KIBM-Versionsnummer ist ungültig oder fehlt.": "The KIBM version number is invalid or missing.",
+    "GitHub hat eine ungültige Antwort geliefert.": "GitHub returned an invalid response.",
+    "GitHub hat keine gültige Commit-ID geliefert.": "GitHub did not return a valid commit ID.",
+    "USB-Ziel wird geprüft.": "Checking USB destination.",
+    "Modell unbekannt": "model unknown",
+    "Der Stick wird formatiert; alle vorhandenen Daten darauf werden gelöscht.": "The drive will be formatted; all existing data on it will be erased.",
+    "Verkleinerte Kopie auf ": "Shrunk copy on ",
+    "Bestätige zuerst das sichere Druckerstatus.": "Confirm that the printer is safe first.",
+    "Bitte mit dem bestehenden Pi-Konto anmelden.": "Sign in with the existing Pi account.",
+    "Ungültiger Origin.": "Invalid origin.",
+    "Ungültiges CSRF-Token.": "Invalid CSRF token.",
+    "Der KIBM-Dienststatus ist nicht verfügbar.": "KIBM service status is unavailable.",
+    "KIBM wird gerade aktualisiert. Bitte warte, bis der Vorgang abgeschlossen ist.": "KIBM is being updated. Wait for it to finish.",
+    "Der USB-Dienst hat keine Antwort gesendet.": "The USB service did not send a response.",
+    "Der USB-Dienst hat den Download nicht geöffnet.": "The USB service did not open the download.",
+    "USB-Erkennung ist derzeit nicht verfügbar.": "USB detection is currently unavailable.",
+    "USB-Images können nicht gelesen werden.": "USB images cannot be read.",
+    "Bestätige zuerst das Löschen der ausgewählten Image-Datei.": "Confirm deletion of the selected image file first.",
+    "USB-Image konnte nicht gelöscht werden.": "The USB image could not be deleted.",
+    "Bestätige zuerst das Update.": "Confirm the update first.",
+    "Ein SD-Karten-Image wird gerade vorbereitet oder übertragen. Warte bitte bis zum Abschluss.": "An SD card image is being prepared or transferred. Wait until it finishes.",
+    "Es ist kein neues GitHub-Update verfügbar.": "No new GitHub update is available.",
+    "Der Web-Updater ist auf dieser Installation nicht bereit.": "The web updater is not ready on this installation.",
+    "Der Update-Dienst hat eine ungültige Antwort gesendet.": "The update service returned an invalid response.",
+    "Der Update-Dienst ist derzeit nicht verfügbar.": "The update service is currently unavailable.",
+    "Zu viele Anmeldeversuche. Bitte in zehn Minuten erneut versuchen.": "Too many sign-in attempts. Try again in ten minutes.",
+    "Pi-Anmeldung ist nicht erreichbar.": "Pi sign-in is unavailable.",
+    "Das Passwort des Pi-Kontos ist falsch.": "The Pi account password is incorrect.",
+    "Bestätige zuerst die Erstellung des vollständigen SD-Karten-Images.": "Confirm creation of the full SD card image first.",
+    "Image-Auftrag nicht gefunden.": "Image job not found.",
+    "Download nicht verfügbar.": "Download unavailable.",
+    "Bestätige zuerst den sicheren Druckerstatus.": "Confirm that the printer is safe first.",
+    "Bestätige, dass der gewählte USB-Stick formatiert und vollständig gelöscht werden darf.": "Confirm that the selected USB drive may be formatted and completely erased.",
+    "USB-Image konnte nicht gestartet werden.": "The USB image job could not be started.",
+    "USB-Auftrag nicht gefunden.": "USB job not found.",
+    "USB-Auftragsstatus ist nicht erreichbar.": "USB job status is unavailable.",
+    "USB-Image-Download nicht gefunden.": "USB image download not found.",
+    "USB-Image-Download ist nicht verfügbar.": "USB image download is unavailable.",
+    "USB-Stick konnte nicht sicher ausgeworfen werden.": "The USB drive could not be safely ejected.",
+    "Nicht erkannt": "Not detected",
+    "Blockgeräte konnten nicht sicher gelesen werden.": "Block devices could not be read safely.",
+    "Druckauftrag aktiv oder pausiert.": "A print job is active or paused.",
+    "Drucker bereit.": "Printer is ready.",
+    "Druckerstatus ist unbekannt; manuelle Bestätigung erforderlich.": "Printer status is unknown; manual confirmation is required.",
+    "Moonraker nicht erreichbar oder Status ungültig; manuelle Bestätigung erforderlich.": "Moonraker is unavailable or its status is invalid; manual confirmation is required.",
+    "Ein Druckauftrag läuft oder ist pausiert. Das Backup ist gesperrt.": "A print job is running or paused. Backup is blocked.",
+    "Systemlaufwerk konnte nicht eindeutig erkannt werden.": "The system drive could not be identified reliably.",
+    "Nur die interne microSD unter /dev/mmcblk0 wird derzeit unterstützt.": "Only the internal microSD at /dev/mmcblk0 is currently supported.",
+    "Die FAT-Bootpartition konnte nicht sicher erkannt werden.": "The FAT boot partition could not be identified safely.",
+    "Die ext4-Systempartition konnte nicht sicher erkannt werden.": "The ext4 system partition could not be identified safely.",
+    "Das erkannte Systemlaufwerk ist kein Blockgerät.": "The detected system drive is not a block device.",
+    "KIBM hat keinen lesenden Zugriff auf die System-microSD.": "KIBM does not have read access to the system microSD.",
+    "KIBM wird gerade aktualisiert. Bitte warte, bis der Vorgang abgeschlossen ist.": "KIBM is being updated. Wait for it to finish.",
+    "Das gewählte Ziel ist kein Blockgerät.": "The selected target is not a block device.",
+    "Der ausgewählte USB-Stick wurde nicht mehr erkannt.": "The selected USB drive is no longer detected.",
+    "Das ausgewählte Ziel ist kein Blockgerät.": "The selected target is not a block device.",
+    "Der USB-Einhängepunkt ist bereits belegt.": "The USB mount point is already in use.",
+    "Der USB-Stick wurde gewechselt.": "The USB drive has changed.",
+    "Aus Sicherheitsgründen wird ein Systemlaufwerk nicht formatiert.": "For safety, a system drive will not be formatted.",
+    "Der USB-Stick wurde vor dem Formatieren gewechselt. Es wurde nichts formatiert.": "The USB drive changed before formatting. Nothing was formatted.",
+    "Die neue USB-Partition wurde nach dem Formatieren nicht erkannt.": "The new USB partition was not detected after formatting.",
+    "Es wurde nichts formatiert.": "Nothing was formatted.",
+    "Arbeitskopie für PiShrink wird erstellt.": "Creating a working copy for PiShrink.",
+    "PiShrink prüft und verkleinert Dateisystem und Partition.": "PiShrink is checking and shrinking the filesystem and partition.",
+    "PiShrink hat kein kleineres, gültiges Image erzeugt.": "PiShrink did not create a smaller, valid image.",
+    "Prüfsumme des verkleinerten Images wird berechnet.": "Calculating the checksum of the shrunk image.",
+    "Moonraker meldet einen aktiven Druckauftrag.": "Moonraker reports an active print job.",
+    "Der USB-Stick wurde gewechselt oder ist nicht mehr verfügbar.": "The USB drive changed or is no longer available.",
+    "Der USB-Stick wurde beim Einbinden gewechselt.": "The USB drive changed while being mounted.",
+    "Die Image-Datei wurde seit der Auswahl verändert. Wähle sie erneut aus.": "The image file changed after selection. Select it again.",
+    "Das Image ist bereits kompakt oder sein Dateisystem lässt sich nicht sicher prüfen.": "The image is already compact or its filesystem cannot be checked safely.",
+    "Auf dem Stick fehlt freier Speicherplatz für eine vollständige Arbeitskopie.": "There is not enough free space on the drive for a full working copy.",
+    "Verkleinerte Kopie ist auf USB gespeichert.": "The shrunk copy is saved on USB.",
+    "Moonraker meldet einen aktiven Druck. Es wurde noch nichts formatiert.": "Moonraker reports an active print. Nothing has been formatted.",
+    "Der USB-Stick wurde seit der Auswahl gewechselt. Es wurde nichts formatiert.": "The USB drive changed after selection. Nothing has been formatted.",
+    "Die Größe der System-microSD hat sich geändert.": "The size of the system microSD has changed.",
+    "USB-Stick wird als exFAT vorbereitet.": "Preparing USB drive as exFAT.",
+    "Nach dem Formatieren steht nicht genug freier Platz für den sicheren Image-Ablauf zur Verfügung.": "There is not enough free space after formatting for the safe image workflow.",
+    "Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.": "Moonraker reports an active print. The backup was not started.",
+    "Vollständiges Karten-Image wird auf den USB-Stick geschrieben.": "Writing the full card image to the USB drive.",
+    "Die System-microSD ist kein Blockgerät.": "The system microSD is not a block device.",
+    "Die Image-Datei wurde seit der Auswahl verändert. Scanne den Stick erneut.": "The image file changed after selection. Scan the drive again.",
+    "Das Image ist bereits kompakt oder sein Dateisystem lässt sich nicht sicher prüfen.": "The image is already compact or its filesystem cannot be checked safely.",
+    "Geschriebenes Image wird vom USB-Stick zurückgelesen und geprüft.": "Reading back and verifying the image written to the USB drive.",
+    "Der SHA-256-Vergleich der geschriebenen USB-Image-Datei ist fehlgeschlagen.": "The SHA-256 comparison of the USB image failed.",
+    "Image ist auf dem USB-Stick gespeichert und kann heruntergeladen werden.": "The image is saved on the USB drive and is ready to download.",
+    "USB-Image konnte nicht sicher erstellt werden.": "The USB image could not be created safely.",
+    "Auf dem USB-Stick läuft bereits ein Auftrag oder Download.": "A job or download is already running on the USB drive.",
+    "Die Image-Datei ist nicht mehr verfügbar. Wähle sie erneut aus.": "The image file is no longer available. Select it again.",
+    "Dieses Image ist bereits kompakt oder kann nicht sicher geprüft werden.": "This image is already compact or cannot be checked safely.",
+    "Image auf USB wird geöffnet.": "Opening image on USB.",
+    "Warte, bis der laufende USB-Auftrag und alle Downloads abgeschlossen sind.": "Wait for the current USB job and all downloads to finish.",
+    "Das Image ist nicht mehr in der aktuellen USB-Liste. Scanne den Stick erneut.": "The image is no longer in the current USB list. Scan the drive again.",
+    "Es kann nur eine einzelne .img-Datei gelöscht werden.": "Only a single .img file can be deleted.",
+    "Die Image-Datei wurde seit der Auswahl verändert. Scanne den Stick erneut.": "The image file changed after selection. Scan the drive again.",
+    "Bestätige zuerst, dass der USB-Stick vollständig formatiert werden darf.": "Confirm that the USB drive may be fully formatted first.",
+    "USB-Ziel fehlt.": "USB destination is missing.",
+    "Größe der System-microSD nicht verfügbar.": "System microSD size is unavailable.",
+    "USB-Ziel wird geprüft.": "Checking USB destination.",
+    "Ungültiger Dateiname.": "Invalid filename.",
+    "Image-Download ist nicht bereit.": "Image download is not ready.",
+    "Ein USB-Image wird bereits zum PC übertragen.": "A USB image is already being transferred to the PC.",
+    "Die Image-Datei auf dem USB-Stick ist nicht verfügbar.": "The image file on the USB drive is unavailable.",
+    "Der USB-Stick kann während eines laufenden Auftrags nicht ausgeworfen werden.": "The USB drive cannot be ejected while a job is running.",
+    "Warte, bis der Browser-Download abgeschlossen ist, bevor du den Stick auswirfst.": "Wait for the browser download to finish before ejecting the drive.",
+    "Der USB-Einhängepunkt ist noch aktiv. Versuche den sicheren Auswurf erneut.": "The USB mount point is still active. Try safely ejecting again.",
+    "Warte, bis das USB-Image fertig ist und alle Downloads abgeschlossen sind.": "Wait until the USB image and all downloads are finished.",
+    "Bitte den USB-Stick vor dem Update sicher auswerfen.": "Safely eject the USB drive before updating.",
+    "Ein Update läuft bereits.": "An update is already running.",
+  };
+
+  const partialTranslations = [
+    ["Installiert ", "Installed "],
+    [" · GitHub-Version wird geprüft. Beim Pi-Start kann die erste Prüfung länger dauern.", " · Checking GitHub for updates. The first check after the Pi starts may take longer."],
+    [" · Installer-Status ", " · Installer status "],
+    [". Logs: sudo kibm-admin logs.", ". Logs: sudo kibm-admin logs."],
+    [" · verfügbar ", " · available "],
+    [" · GitHub ", " · GitHub "],
+    [". Diese Installation muss einmalig per SSH mit sudo kibm-admin update vorbereitet werden.", ". This installation must be prepared once over SSH with sudo kibm-admin update."],
+    ["Erneuter Versuch in 15 Sekunden.", "Retrying in 15 seconds."],
+    ["Automatischer erneuter Versuch in 10 Sekunden.", "Automatically retrying in 10 seconds."],
+    [" · erneuter Versuch in 3 Sekunden.", " · retrying in 3 seconds."],
+    ["lokale Änderungen erkannt", "local changes detected"],
+    [" Erneuter Versuch in 15 Sekunden.", " Retrying in 15 seconds."],
+    ["noch ca. ", "about "],
+    [" verkleinerbar", " shrinkable"],
+    ["Schritt ", "Step "],
+    [" von ", " of "],
+    [" geschrieben.", " written."],
+    [" für SHA-256 gelesen.", " read for SHA-256."],
+    [" an den Browser übertragen. SHA-256:", " transferred to the browser. SHA-256:"],
+    [" an den Browser übertragen.", " transferred to the browser."],
+    ["Der Shrink ist fehlgeschlagen. Das vollständige Image ist erhalten.", "Shrinking failed. The full image is preserved."],
+    ["Ein Druckauftrag läuft oder ist pausiert. Das Backup ist gesperrt.", "A print job is running or paused. Backup is blocked."],
+    ["Systemlaufwerk konnte nicht eindeutig erkannt werden.", "The system drive could not be identified reliably."],
+    ["Nur die interne microSD unter /dev/mmcblk0 wird derzeit unterstützt.", "Only the internal microSD at /dev/mmcblk0 is currently supported."],
+    ["Die FAT-Bootpartition konnte nicht sicher erkannt werden.", "The FAT boot partition could not be identified safely."],
+    ["Die ext4-Systempartition konnte nicht sicher erkannt werden.", "The ext4 system partition could not be identified safely."],
+    ["Das erkannte Systemlaufwerk ist kein Blockgerät.", "The detected system drive is not a block device."],
+    ["KIBM hat keinen lesenden Zugriff auf die System-microSD.", "KIBM does not have read access to the system microSD."],
+    ["USB-Ziel wird geprüft.", "Checking USB destination."],
+  ];
+
+  const patterns = [
+    [/^(.+) · Verkleinerte Kopie auf (.+)\.$/, (_match, name, partition) => `${name} · Shrunk copy on ${partition}.`],
+    [/^(.+) · (.+)\. Vor der Sicherung wird der Stick als exFAT formatiert; vorhandene Daten werden gelöscht\.$/, (_match, model, detail) => `${model} · ${detail}. Before the backup, the drive will be formatted as exFAT and existing data will be erased.`],
+    [/^(\d+) USB-Stick erkannt\. Wähle den gewünschten Stick aus\.$/, (_match, count) => `${count} USB drive detected. Select the drive you want to use.`],
+    [/^(\d+) USB-Sticks erkannt\. Wähle den gewünschten Stick aus\.$/, (_match, count) => `${count} USB drives detected. Select the drive you want to use.`],
+    [/^KIBM erkennt etwa (.+) möglichen Shrink-Spielraum\. Die tatsächliche Ersparnis kann geringer sein; das Original bleibt erhalten\.$/, (_match, amount) => `KIBM estimates about ${amount} of potential shrink space. Actual savings may be lower; the original is preserved.`],
+    [/^Zu wenig Platz: Der Stick hat (.+)\. Diese Auswahl benötigt rund (.+)\.(.*)$/, (_match, available, required, extra) => `Not enough space: the drive has ${available}. This option needs about ${required}.${translateBody(extra)}`],
+    [/^Installiert (.+) · GitHub-Version wird geprüft\. Beim Pi-Start kann die erste Prüfung länger dauern\.$/, (_match, version) => `Installed ${version} · Checking GitHub for updates. The first check after the Pi starts may take longer.`],
+    [/^Installiert (.+) · Installer-Status (.+)\. Logs: sudo kibm-admin logs\.$/, (_match, version, status) => `Installed ${version} · Installer status ${status}. Logs: sudo kibm-admin logs.`],
+    [/^Installiert (.+) · (.+) Erneuter Versuch in 15 Sekunden\.$/, (_match, version, reason) => `Installed ${version} · ${reason} Retrying in 15 seconds.`],
+    [/^Installiert (.+) · verfügbar (.+)\. Diese Installation muss einmalig per SSH mit sudo kibm-admin update vorbereitet werden\.$/, (_match, current, latest) => `Installed ${current} · available ${latest}. This installation must be prepared once over SSH with sudo kibm-admin update.`],
+    [/^Installiert (.+) · GitHub (.+)\.$/, (_match, current, latest) => `Installed ${current} · GitHub ${latest}.`],
+    [/^Installiert (.+) · KIBM oder GitHub antwortet noch nicht\. Automatischer erneuter Versuch in 10 Sekunden\.$/, (_match, version) => `Installed ${version} · KIBM or GitHub has not responded yet. Automatically retrying in 10 seconds.`],
+    [/^(.+) → (.+)( · lokale Änderungen erkannt)? · (.+)$/, (_match, current, latest, dirty, message) => `${current} → ${latest}${dirty ? " · local changes detected" : ""} · ${message}`],
+    [/^AKTUALISIERT (.+)$/, (_match, time) => `UPDATED ${time}`],
+    [/^Schritt (\d)\/3 · (.+) (.+) von (.+)\.$/, (_match, step, message, current, total) => `Step ${step}/3 · ${translate(message)} ${current} of ${total}.`],
+    [/^Der USB-Stick ist zu klein\. Diese Auswahl benötigt rund (.+) GiB\. Es wurde nichts formatiert\.$/, (_match, required) => `The USB drive is too small. This option needs about ${required} GiB. Nothing was formatted.`],
+    [/^Image „(.+)“ wurde vom USB-Stick gelöscht\.$/, (_match, filename) => `Image “${filename}” was deleted from the USB drive.`],
+  ];
+
+  function translateBody(body) {
+    if (translations[body]) return translations[body];
+    for (const [pattern, replacement] of patterns) {
+      if (pattern.test(body)) return body.replace(pattern, replacement);
+    }
+    return partialTranslations.reduce((text, [source, target]) => text.replaceAll(source, target), body);
+  }
+
+  function translate(source) {
+    if (typeof source !== "string") return source;
+    if (language !== "en") return source;
+    if (translations[source]) return translations[source];
+    const leading = source.match(/^\s*/)?.[0] || "";
+    const trailing = source.match(/\s*$/)?.[0] || "";
+    const body = source.slice(leading.length, source.length - trailing.length || undefined);
+    return `${leading}${translateBody(body)}${trailing}`;
+  }
+
+  const languageButtons = () => document.querySelectorAll("[data-language]");
+  const textSources = new WeakMap();
+  const attributeSources = new WeakMap();
+  const translatedAttributes = ["aria-label", "data-tooltip", "placeholder", "title", "alt"];
+  let language = "de";
+  try {
+    language = localStorage.getItem("kibm-language") === "en" ? "en" : "de";
+  } catch {}
+  document.documentElement.lang = language;
+
+  function localizeText(node) {
+    if (!textSources.has(node)) textSources.set(node, node.nodeValue);
+    const source = textSources.get(node);
+    const output = language === "en" ? translate(source) : source;
+    if (node.nodeValue !== output) node.nodeValue = output;
+  }
+
+  function localizeAttributes(element) {
+    let originals = attributeSources.get(element);
+    if (!originals) {
+      originals = new Map();
+      attributeSources.set(element, originals);
+    }
+    for (const name of translatedAttributes) {
+      if (!element.hasAttribute(name)) continue;
+      if (!originals.has(name)) originals.set(name, element.getAttribute(name));
+      const source = originals.get(name);
+      const output = language === "en" ? translate(source) : source;
+      if (element.getAttribute(name) !== output) element.setAttribute(name, output);
+    }
+  }
+
+  function visit(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.parentElement && !["SCRIPT", "STYLE"].includes(node.parentElement.tagName)) localizeText(node);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_NODE) return;
+    if (node.nodeType === Node.ELEMENT_NODE) localizeAttributes(node);
+    for (const child of node.childNodes) visit(child);
+  }
+
+  function updateLanguageControls() {
+    for (const button of languageButtons()) {
+      button.setAttribute("aria-pressed", String(button.dataset.language === language));
+    }
+  }
+
+  function setLanguage(nextLanguage) {
+    if (!["de", "en"].includes(nextLanguage) || language === nextLanguage) return;
+    language = nextLanguage;
+    document.documentElement.lang = language;
+    try { localStorage.setItem("kibm-language", language); } catch {}
+    visit(document.documentElement);
+    updateLanguageControls();
+    window.dispatchEvent(new CustomEvent("kibm:languagechange", { detail: { language } }));
+  }
+
+  for (const button of languageButtons()) {
+    button.addEventListener("click", () => setLanguage(button.dataset.language));
+  }
+
+  visit(document.documentElement);
+  updateLanguageControls();
+  new MutationObserver(records => {
+    for (const record of records) {
+      if (record.type === "characterData") localizeText(record.target);
+      if (record.type === "attributes") localizeAttributes(record.target);
+      for (const node of record.addedNodes || []) visit(node);
+    }
+  }).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: translatedAttributes,
+  });
+
+  window.KIBM_I18N = {
+    get language() { return language; },
+    get formatLocale() { return language === "en" ? "en-US" : "de-DE"; },
+    translate,
+  };
+})();
