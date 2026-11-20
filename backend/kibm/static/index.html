@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.2.3">
-  <script src="/static/app.js?v=0.2.3" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.2.4">
+  <script src="/static/app.js?v=0.2.4" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -95,6 +95,19 @@
           </form>
         </dialog>
 
+        <dialog id="delete-image-dialog" class="backup-dialog" aria-labelledby="delete-image-title">
+          <form method="dialog" id="delete-image-form">
+            <h2 id="delete-image-title">Image-Datei löschen?</h2>
+            <p id="delete-image-detail"></p>
+            <p>Nur diese .img-Datei wird vom USB-Stick entfernt. Dieser Schritt kann nicht rückgängig gemacht werden.</p>
+            <p id="delete-image-error" class="error-text" role="alert"></p>
+            <div class="dialog-actions">
+              <button id="delete-image-cancel" class="secondary-button" type="button">Abbrechen</button>
+              <button id="delete-image-confirm" class="secondary-button destructive-button" type="button">Image löschen</button>
+            </div>
+          </form>
+        </dialog>
+
         <dialog id="update-dialog" class="backup-dialog" aria-labelledby="update-dialog-title">
           <form id="update-form">
             <input type="text" name="username" autocomplete="username" hidden>
@@ -163,7 +176,7 @@
           </article>
         </section>
 
-        <footer class="footer"><span>KIBM <b>0.2.3</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
+        <footer class="footer"><span>KIBM <b>0.2.4</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
       </div>
     </main>
   </div>

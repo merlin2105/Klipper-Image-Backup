@@ -13,6 +13,7 @@ let usbDeviceSignature = null;
 let usbScanInProgress = false;
 let usbImages = [];
 let imageScanInProgress = false;
+let pendingDeleteImageId = null;
 let updatePoll = null;
 const UPDATE_TARGET_KEY = "kibm-update-target";
 
@@ -537,15 +538,31 @@ $("existing-image").addEventListener("change", updateDestination);
 $("delete-existing-image").addEventListener("click", async () => {
   const image = usbImages.find(item => item.id === $("existing-image").value);
   if (!image) return;
-  if (!window.confirm(`Image-Datei wirklich löschen?\n\n${image.filename}\n${formatBytes(image.size_bytes)}\n\nNur diese .img-Datei wird entfernt. Dieser Schritt kann nicht rückgängig gemacht werden.`)) return;
-  const button = $("delete-existing-image");
+  pendingDeleteImageId = image.id;
+  $("delete-image-detail").textContent = `${image.filename} · ${formatBytes(image.size_bytes)}`;
+  $("delete-image-error").textContent = "";
+  $("delete-image-confirm").disabled = false;
+  $("delete-image-dialog").showModal();
+});
+
+$("delete-image-cancel").addEventListener("click", () => $("delete-image-dialog").close());
+$("delete-image-confirm").addEventListener("click", async () => {
+  const image = usbImages.find(item => item.id === pendingDeleteImageId);
+  if (!image) {
+    $("delete-image-error").textContent = "Das ausgewählte Image ist nicht mehr verfügbar. Scanne den Stick erneut.";
+    return;
+  }
+  const button = $("delete-image-confirm");
   button.disabled = true;
+  $("delete-image-error").textContent = "";
   try {
     await api("/api/backup/usb/images/delete", { method: "POST", body: JSON.stringify({ image_id: image.id, confirmed: true }) });
+    $("delete-image-dialog").close();
+    pendingDeleteImageId = null;
     await loadExistingImages();
     $("preflight-message").textContent = `Image „${image.filename}“ wurde vom USB-Stick gelöscht.`;
   } catch (error) {
-    $("preflight-message").textContent = error.message;
+    $("delete-image-error").textContent = error.message;
   } finally {
     button.disabled = false;
   }
