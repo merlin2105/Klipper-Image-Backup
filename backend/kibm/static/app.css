@@ -83,6 +83,8 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 .existing-image-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #303a34; }
 .existing-image-actions span { color: var(--muted); font-size: 12px; }
 #delete-image-detail { overflow-wrap: anywhere; color: var(--text); font-weight: 600; }
+#delete-image-auth-fields { display: flex; flex-direction: column; gap: 8px; }
+#delete-image-auth-fields[hidden] { display: none; }
 .existing-images-label { display: block; margin-bottom: 10px; color: #c4cdc5; font-size: 12px; font-weight: 600; }
 .existing-image-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 10px; }
 .existing-image-choice { display: flex; min-width: 0; min-height: 88px; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; text-align: left; cursor: pointer; }

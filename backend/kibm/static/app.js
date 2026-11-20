@@ -541,8 +541,20 @@ $("delete-existing-image").addEventListener("click", async () => {
   pendingDeleteImageId = image.id;
   $("delete-image-detail").textContent = `${image.filename} · ${formatBytes(image.size_bytes)}`;
   $("delete-image-error").textContent = "";
-  $("delete-image-confirm").disabled = false;
+  $("delete-image-password").value = "";
+  $("delete-image-confirm").disabled = true;
   $("delete-image-dialog").showModal();
+  try {
+    const session = await api("/api/session");
+    csrfToken = session.authenticated ? session.csrf_token : "";
+    $("delete-image-auth-fields").hidden = session.authenticated;
+    $("delete-image-password").required = !session.authenticated;
+    if (!session.authenticated) $("delete-image-password").focus();
+  } catch (error) {
+    $("delete-image-error").textContent = error.message;
+  } finally {
+    $("delete-image-confirm").disabled = false;
+  }
 });
 
 $("delete-image-cancel").addEventListener("click", () => $("delete-image-dialog").close());
@@ -556,6 +568,19 @@ $("delete-image-confirm").addEventListener("click", async () => {
   button.disabled = true;
   $("delete-image-error").textContent = "";
   try {
+    if (!csrfToken) {
+      if (!$("delete-image-password").value) {
+        $("delete-image-error").textContent = "Gib zuerst dein bestehendes Pi-Passwort ein.";
+        $("delete-image-password").focus();
+        return;
+      }
+      const login = await api("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ password: $("delete-image-password").value }),
+      });
+      csrfToken = login.csrf_token;
+      $("delete-image-password").value = "";
+    }
     await api("/api/backup/usb/images/delete", { method: "POST", body: JSON.stringify({ image_id: image.id, confirmed: true }) });
     $("delete-image-dialog").close();
     pendingDeleteImageId = null;
@@ -563,6 +588,13 @@ $("delete-image-confirm").addEventListener("click", async () => {
     $("preflight-message").textContent = `Image „${image.filename}“ wurde vom USB-Stick gelöscht.`;
   } catch (error) {
     $("delete-image-error").textContent = error.message;
+    if (error.status === 401) {
+      csrfToken = "";
+      $("delete-image-auth-fields").hidden = false;
+      $("delete-image-password").required = true;
+      $("delete-image-password").value = "";
+      $("delete-image-password").focus();
+    }
   } finally {
     button.disabled = false;
   }

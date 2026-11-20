@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.2.4">
-  <script src="/static/app.js?v=0.2.4" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.2.6">
+  <script src="/static/app.js?v=0.2.6" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -96,16 +96,20 @@
         </dialog>
 
         <dialog id="delete-image-dialog" class="backup-dialog" aria-labelledby="delete-image-title">
-          <form method="dialog" id="delete-image-form">
+          <div id="delete-image-form">
             <h2 id="delete-image-title">Image-Datei löschen?</h2>
             <p id="delete-image-detail"></p>
             <p>Nur diese .img-Datei wird vom USB-Stick entfernt. Dieser Schritt kann nicht rückgängig gemacht werden.</p>
+            <div id="delete-image-auth-fields" hidden>
+              <label for="delete-image-password">Bestehendes Pi-Passwort</label>
+              <input id="delete-image-password" type="password" autocomplete="current-password">
+            </div>
             <p id="delete-image-error" class="error-text" role="alert"></p>
             <div class="dialog-actions">
               <button id="delete-image-cancel" class="secondary-button" type="button">Abbrechen</button>
               <button id="delete-image-confirm" class="secondary-button destructive-button" type="button">Image löschen</button>
             </div>
-          </form>
+          </div>
         </dialog>
 
         <dialog id="update-dialog" class="backup-dialog" aria-labelledby="update-dialog-title">
@@ -176,7 +180,7 @@
           </article>
         </section>
 
-        <footer class="footer"><span>KIBM <b>0.2.4</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
+        <footer class="footer"><span>KIBM <b>0.2.6</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
       </div>
     </main>
   </div>
