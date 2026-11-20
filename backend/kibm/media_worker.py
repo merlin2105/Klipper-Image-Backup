@@ -717,15 +717,21 @@ class MediaHandler(socketserver.StreamRequestHandler):
     def _eject(self, request: dict[str, Any]) -> None:
         _ensure_update_idle()
         with _lock:
-            if not _job or _job.job_id != request.get("job_id"):
-                raise ValueError("USB-Auftrag nicht gefunden.")
-            if _job.state in BUSY_STATES:
+            if _job and _job.state in BUSY_STATES:
                 raise ValueError("Der USB-Stick kann während eines laufenden Auftrags nicht ausgeworfen werden.")
             if _job and _job.active_downloads:
                 raise ValueError("Warte, bis der Browser-Download abgeschlossen ist, bevor du den Stick auswirfst.")
             if os.path.ismount(str(VOLUME_PATH)):
-                _run(["sync"])
-                _run(["umount", "--", str(VOLUME_PATH)])
+                source = _run(["findmnt", "-n", "-o", "SOURCE", "--target", str(VOLUME_PATH)], timeout=5).stdout.strip()
+                try:
+                    _run(["sync"], timeout=30)
+                    _run(["umount", "--", str(VOLUME_PATH)], timeout=15)
+                except subprocess.SubprocessError:
+                    if not source.startswith("/dev/") or Path(source).exists():
+                        raise
+                    _run(["umount", "--lazy", "--", str(VOLUME_PATH)], timeout=15)
+                if os.path.ismount(str(VOLUME_PATH)):
+                    raise ValueError("Der USB-Einhängepunkt ist noch aktiv. Versuche den sicheren Auswurf erneut.")
         self._reply({"ejected": True})
 
     def _update_status(self) -> None:
@@ -748,7 +754,10 @@ class MediaHandler(socketserver.StreamRequestHandler):
             state = "success"
         else:
             state = "idle"
-        self._reply({"available": loaded, "state": state, "exit_status": fields.get("ExecMainStatus")})
+        self._reply({
+            "available": loaded, "state": state, "exit_status": fields.get("ExecMainStatus"),
+            "usb_mounted": os.path.ismount(str(VOLUME_PATH)),
+        })
 
     def _update_start(self) -> None:
         with _lock:

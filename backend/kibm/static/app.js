@@ -625,9 +625,11 @@ $("update-button").addEventListener("click", async () => {
     $("update-password").required = !session.authenticated;
     $("update-password").value = "";
     $("update-error").textContent = "";
+    $("update-eject").hidden = !status.worker?.usb_mounted;
     const current = status.current_version || installedVersionLabel();
     const latest = status.latest_version || "Versionsnummer nicht abrufbar";
-    $("update-dialog-detail").textContent = `${current} → ${latest}. KIBM lädt die GitHub-Version und startet seine Dienste neu; die Oberfläche ist kurz nicht erreichbar.`;
+    const ejectNotice = status.worker?.usb_mounted ? " Bitte wirf zuerst den USB-Stick sicher aus." : "";
+    $("update-dialog-detail").textContent = `${current} → ${latest}.${ejectNotice} KIBM startet seine Dienste während des Updates neu.`;
     $("update-dialog").showModal();
   } catch (error) {
     $("update-detail").textContent = error.message;
@@ -637,6 +639,33 @@ $("update-button").addEventListener("click", async () => {
 $("update-cancel").addEventListener("click", () => {
   $("update-password").value = "";
   $("update-dialog").close();
+});
+
+$("update-eject").addEventListener("click", async () => {
+  const button = $("update-eject");
+  button.disabled = true;
+  $("update-error").textContent = "";
+  try {
+    if (!csrfToken) {
+      const password = $("update-password").value;
+      if (!password) {
+        $("update-error").textContent = "Gib zuerst dein bestehendes Pi-Passwort ein.";
+        $("update-password").focus();
+        return;
+      }
+      const login = await api("/api/login", { method: "POST", body: JSON.stringify({ password }) });
+      csrfToken = login.csrf_token;
+      $("update-password").value = "";
+      $("update-auth-fields").hidden = true;
+    }
+    await api("/api/backup/usb/eject", { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(45000) });
+    button.hidden = true;
+    $("update-dialog-detail").textContent = "USB-Stick sicher ausgeworfen. Du kannst das Update jetzt starten.";
+  } catch (error) {
+    $("update-error").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 });
 
 $("update-form").addEventListener("submit", async (event) => {
@@ -653,6 +682,7 @@ $("update-form").addEventListener("submit", async (event) => {
       });
       csrfToken = login.csrf_token;
       $("update-password").value = "";
+      $("update-auth-fields").hidden = true;
     }
     const status = await api("/api/update");
     if (!status.can_update || !status.latest_commit?.sha) throw new Error("Es ist kein startbereites Update verfügbar. Prüfe den Status erneut.");
@@ -680,6 +710,7 @@ $("update-form").addEventListener("submit", async (event) => {
       $("update-dialog").showModal();
     }
     $("update-error").textContent = error.message;
+    if (/USB-Stick.*auswerfen/i.test(error.message)) $("update-eject").hidden = false;
   } finally {
     submit.disabled = false;
   }

@@ -22,7 +22,7 @@ SESSION_TTL_SECONDS = 4 * 60 * 60
 sessions: dict[str, tuple[str, float]] = {}
 login_attempts: dict[str, list[float]] = {}
 usb_jobs: dict[str, tuple[str, str]] = {}
-app = FastAPI(title="Klipper Image Backup Manager", version="0.2.7b1", docs_url=None, redoc_url=None)
+app = FastAPI(title="Klipper Image Backup Manager", version="0.2.8b1", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
 
@@ -459,12 +459,9 @@ async def download_usb_image(job_id: str, filename: str, request: Request, token
 
 @app.post("/api/backup/usb/eject")
 async def eject_usb(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
-    session_id, _ = _require_csrf(request, x_kibm_csrf)
-    job_id = next((key for key in reversed(usb_jobs) if hmac.compare_digest(usb_jobs[key][0], session_id)), None)
-    if not job_id:
-        raise HTTPException(status_code=404, detail="Kein eigener USB-Auftrag gefunden.")
+    _require_csrf(request, x_kibm_csrf)
     try:
-        return _media_request({"action": "eject", "job_id": job_id})
+        return _media_request({"action": "eject"})
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc) or "USB-Stick konnte nicht sicher ausgeworfen werden.") from exc
 

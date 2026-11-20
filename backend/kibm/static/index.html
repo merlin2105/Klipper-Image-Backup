@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#111514">
   <title>KIBM · Systemübersicht</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.2.7">
-  <script src="/static/app.js?v=0.2.7" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.2.8">
+  <script src="/static/app.js?v=0.2.8" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -119,6 +119,7 @@
             <p id="update-dialog-detail">Die aktuelle Version wird von GitHub geladen. KIBM startet während des Updates kurz neu.</p>
             <div id="update-auth-fields"><label for="update-password">Bestehendes Pi-Passwort</label><input id="update-password" type="password" autocomplete="current-password" required></div>
             <p id="update-error" class="error-text" role="alert"></p>
+            <button id="update-eject" class="secondary-button" type="button" hidden>USB-Stick sicher auswerfen</button>
             <div class="dialog-actions"><button id="update-cancel" class="secondary-button" type="button">Abbrechen</button><button id="update-submit" class="primary-button" type="submit">Jetzt aktualisieren</button></div>
           </form>
         </dialog>
@@ -180,7 +181,7 @@
           </article>
         </section>
 
-        <footer class="footer"><span>KIBM <b id="kibm-version">0.2.7</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
+        <footer class="footer"><span>KIBM <b id="kibm-version">0.2.8</b> · BETA</span><span>Erstellt für sichere Klipper-Backups</span><span id="footer-time">—</span></footer>
       </div>
     </main>
   </div>
