@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "klipper-image-backup-manager"
-version = "0.2.10b5"
+version = "0.2.10b6"
 description = "Safety-first diagnostics and offline backup preparation for Klipper hosts"
 requires-python = ">=3.9"
 dependencies = ["fastapi>=0.115,<0.166", "uvicorn>=0.30,<1"]

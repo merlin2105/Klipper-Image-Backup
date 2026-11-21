@@ -22,6 +22,7 @@ def test_stream_job_emits_full_source_and_records_sha256(monkeypatch) -> None:
     monkeypatch.setattr(image_stream, "_device_size", lambda _fd: len(source))
     monkeypatch.setattr(image_stream.os, "read", lambda _fd, amount: source[:amount])
     monkeypatch.setattr(image_stream.os, "close", lambda _fd: None)
+    monkeypatch.setattr(image_stream.os, "posix_fadvise", lambda *_args: None)
     monkeypatch.setattr(services, "klipper_status", lambda: {"classification": "ready"})
 
     assert b"".join(image_stream.stream_job(job)) == source
@@ -46,6 +47,7 @@ def test_stream_job_aborts_during_active_print(monkeypatch) -> None:
     monkeypatch.setattr(image_stream.os, "fstat", lambda _fd: type("BlockInfo", (), {"st_mode": stat.S_IFBLK, "st_rdev": 123})())
     monkeypatch.setattr(image_stream, "_device_size", lambda _fd: 8)
     monkeypatch.setattr(image_stream.os, "close", lambda _fd: None)
+    monkeypatch.setattr(image_stream.os, "posix_fadvise", lambda *_args: None)
     monkeypatch.setattr(services, "klipper_status", lambda: {"classification": "active"})
 
     try:
@@ -75,6 +77,7 @@ def _fake_card(monkeypatch, size: int = 8 * 512, partition_end_sector: int = 8) 
     monkeypatch.setattr(image_stream.os, "fstat", lambda _fd: type("BlockInfo", (), {"st_mode": stat.S_IFBLK, "st_rdev": 123})())
     monkeypatch.setattr(image_stream, "_device_size", lambda _fd: size)
     monkeypatch.setattr(image_stream.os, "close", lambda _fd: None)
+    monkeypatch.setattr(image_stream.os, "posix_fadvise", lambda *_args: None)
     return {"path": "/dev/mmcblk0", "type": "disk", "size_bytes": size}
 
 
@@ -146,6 +149,7 @@ def test_stream_syncs_and_reads_only_up_to_the_partition_end(monkeypatch) -> Non
     position = [0]
 
     def read(_fd, amount):
+        calls.append("read")
         chunk = source[position[0]:position[0] + amount]
         position[0] += len(chunk)
         return chunk
@@ -156,8 +160,11 @@ def test_stream_syncs_and_reads_only_up_to_the_partition_end(monkeypatch) -> Non
     monkeypatch.setattr(image_stream, "_device_size", lambda _fd: len(source))
     monkeypatch.setattr(image_stream.os, "read", read)
     monkeypatch.setattr(image_stream.os, "close", lambda _fd: None)
+    monkeypatch.setattr(image_stream.os, "posix_fadvise", lambda *_args: calls.append("drop-cache"))
     monkeypatch.setattr(services, "klipper_status", lambda: {"classification": "ready"})
 
     assert b"".join(image_stream.stream_job(job)) == source[:8 * 512]
-    assert calls[0] == "sync"
+    # The whole-card device has its own page cache that the root filesystem's writes
+    # never update; it must be dropped before the first read or stale blocks leak in.
+    assert calls[:4] == ["sync", "open", "drop-cache", "read"]
     assert job.state == "übertragen"

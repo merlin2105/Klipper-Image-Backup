@@ -289,6 +289,13 @@ def _capture_env(monkeypatch, tmp_path, card, *, repair=lambda _path: False, dev
         media_worker, "_flush_root_journal",
         lambda: calls.append("flush" if not any(volume.glob(".*.part")) else "flush-too-late"),
     )
+    real_fadvise = media_worker.os.posix_fadvise
+    monkeypatch.setattr(
+        media_worker.os, "posix_fadvise",
+        lambda fd, offset, length, advice: calls.append(
+            "drop-cache" if advice == media_worker.os.POSIX_FADV_DONTNEED else "fadvise"
+        ) or real_fadvise(fd, offset, length, advice),
+    )
     device ={"path": "/dev/sdz", "major_minor": "8:0", "size_bytes": 10 ** 9}
     monkeypatch.setattr(media_worker, "_selected_device", lambda _path: device)
     return volume, device, calls
@@ -322,7 +329,22 @@ def test_usb_capture_writes_only_the_partitions_and_leaves_no_partial_file(monke
     written = (volume / images[0]).read_bytes()
     assert written == data[:64 * 512]
     assert job.files[0]["sha256"] == hashlib.sha256(written).hexdigest()
-    assert calls.index("sync") < calls.index("flush") < calls.index("repair")
+    assert calls.index("sync") < calls.index("flush") < calls.index("drop-cache") < calls.index("repair")
+
+
+def test_usb_capture_drops_the_card_cache_before_reading(monkeypatch, tmp_path) -> None:
+    # /dev/mmcblk0 keeps its own page cache, separate from the mounted partition, so
+    # a block cached by an earlier backup stays stale (e.g. the journal superblock).
+    card, data = _source_card(tmp_path)
+    _volume, device, calls = _capture_env(monkeypatch, tmp_path, card)
+    real_read = media_worker.os.read
+    monkeypatch.setattr(media_worker.os, "read", lambda fd, amount: calls.append("read") or real_read(fd, amount))
+    job = _media_job(64 * 512, len(data))
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "bereit", job.error
+    assert calls.index("drop-cache") < calls.index("read")
 
 
 def test_flush_root_journal_freezes_and_thaws_the_root_filesystem(monkeypatch) -> None:

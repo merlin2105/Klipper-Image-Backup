@@ -175,6 +175,9 @@ def stream_job(job: ImageJob) -> Iterator[bytes]:
         info = os.fstat(fd)
         if not stat.S_ISBLK(info.st_mode) or info.st_rdev != job.source_device or _device_size(fd) != job.device_bytes:
             raise OSError("Identität oder Größe der microSD hat sich vor dem Lesen geändert.")
+        # The whole-card device has its own page cache, which writes to the mounted
+        # partition never update; drop it so no block from an earlier read is sent stale.
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
         with _lock:
             job.state = "streaming"
         while sent < job.size_bytes:

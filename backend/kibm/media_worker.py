@@ -580,6 +580,10 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         try:
             if not stat.S_ISBLK(os.fstat(source_fd).st_mode):
                 raise OSError("Die System-microSD ist kein Blockgerät.")
+            # The whole-card device has its own page cache, which writes to the mounted
+            # partition never update. Blocks cached by an earlier backup (e.g. the
+            # journal superblock) would otherwise be copied stale.
+            os.posix_fadvise(source_fd, 0, 0, os.POSIX_FADV_DONTNEED)
             with part_path.open("xb", buffering=0) as output:
                 copied = 0
                 while copied < job.image_size:
