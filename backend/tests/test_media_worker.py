@@ -255,3 +255,154 @@ def test_inspect_image_refuses_unknown_or_inconsistent_images(tmp_path, damage) 
     if damage == "changed_since_listing":
         size += 1
     assert media_worker._inspect_image(image, size, mtime) == {"status": "unknown", "estimated_savings_bytes": 0}
+
+
+# --- USB capture: size, sync, repair, no partial .img files ---------------
+
+def _source_card(tmp_path, *, partition_end_sector=64, device_sectors=96):
+    import struct
+    data = bytearray(bytes(range(256)) * 2 * device_sectors)
+    data[0:512] = bytes(512)
+    data[446 + 4] = 0x83
+    struct.pack_into("<II", data, 446 + 8, 8, partition_end_sector - 8)
+    data[510:512] = b"\x55\xaa"
+    card = tmp_path / "mmcblk0"
+    card.write_bytes(bytes(data))
+    return card, bytes(data)
+
+
+def _capture_env(monkeypatch, tmp_path, card, *, repair=lambda _path: False, device_bytes=None):
+    volume = tmp_path / "volume"
+    volume.mkdir()
+    calls = []
+    monkeypatch.setattr(media_worker, "SOURCE_DEVICE", str(card))
+    monkeypatch.setattr(media_worker, "VOLUME_PATH", volume)
+    monkeypatch.setattr(media_worker, "USB_FORMAT_HEADROOM_BYTES", 0)
+    monkeypatch.setattr(media_worker.stat, "S_ISBLK", lambda _mode: True)
+    monkeypatch.setattr(media_worker, "_disk_size", lambda _path: device_bytes or card.stat().st_size)
+    monkeypatch.setattr(media_worker, "_printer_active", lambda: False)
+    monkeypatch.setattr(media_worker, "_format_usb", lambda _device: calls.append("format"))
+    monkeypatch.setattr(media_worker, "_repair_image", lambda path: calls.append("repair") or repair(path))
+    monkeypatch.setattr(media_worker.os, "sync", lambda: calls.append("sync"))
+    device = {"path": "/dev/sdz", "major_minor": "8:0", "size_bytes": 10 ** 9}
+    monkeypatch.setattr(media_worker, "_selected_device", lambda _path: device)
+    return volume, device, calls
+
+
+def _media_job(image_size, device_size, **values):
+    job = media_worker.MediaJob(
+        job_id="job", state="wird vorbereitet", phase="vorbereitung", message="", image_size=image_size,
+        device_size=device_size, source_device="/dev/mmcblk0", shrink=False, keep_full=False, **values,
+    )
+    media_worker._job = job
+    return job
+
+
+def test_capture_size_is_the_end_of_the_last_partition(tmp_path) -> None:
+    card, data = _source_card(tmp_path, partition_end_sector=64, device_sectors=96)
+    assert media_worker._capture_size(str(card), len(data)) == 64 * 512
+
+
+def test_usb_capture_writes_only_the_partitions_and_leaves_no_partial_file(monkeypatch, tmp_path) -> None:
+    import hashlib
+    card, data = _source_card(tmp_path)
+    volume, device, calls = _capture_env(monkeypatch, tmp_path, card)
+    job = _media_job(64 * 512, len(data))
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "bereit", job.error
+    images = sorted(path.name for path in volume.iterdir())
+    assert len(images) == 1 and images[0].endswith(".img") and not images[0].startswith(".")
+    written = (volume / images[0]).read_bytes()
+    assert written == data[:64 * 512]
+    assert job.files[0]["sha256"] == hashlib.sha256(written).hexdigest()
+    assert calls.index("sync") < calls.index("repair")
+
+
+def test_repaired_image_gets_the_checksum_of_the_repaired_file(monkeypatch, tmp_path) -> None:
+    import hashlib
+
+    def repair(path):
+        with path.open("r+b") as image:
+            image.seek(600)
+            image.write(b"repaired")
+        return True
+
+    card, data = _source_card(tmp_path)
+    volume, device, _calls = _capture_env(monkeypatch, tmp_path, card, repair=repair)
+    job = _media_job(64 * 512, len(data))
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "bereit", job.error
+    image = next(volume.iterdir())
+    assert image.read_bytes()[600:608] == b"repaired"
+    assert job.files[0]["sha256"] == hashlib.sha256(image.read_bytes()).hexdigest()
+    assert job.sha256 == job.files[0]["sha256"]
+
+
+@pytest.mark.parametrize("failure", ["short_card", "repair_failed", "card_size_changed"])
+def test_failed_capture_leaves_no_image_file(monkeypatch, tmp_path, failure) -> None:
+    card, data = _source_card(tmp_path)
+    repair = (lambda _path: (_ for _ in ()).throw(OSError("e2fsck 4"))) if failure == "repair_failed" else (lambda _path: False)
+    volume, device, _calls = _capture_env(monkeypatch, tmp_path, card, repair=repair)
+    image_size = len(data) + 512 if failure == "short_card" else 64 * 512
+    device_size = len(data) + 1 if failure == "card_size_changed" else len(data)
+    job = _media_job(image_size, device_size)
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "fehler"
+    assert list(volume.iterdir()) == []
+    assert job.files == []
+
+
+def test_short_writes_are_completed(tmp_path) -> None:
+    class ShortWriter:
+        def __init__(self):
+            self.data = bytearray()
+
+        def write(self, chunk):
+            part = bytes(chunk[:3])
+            self.data.extend(part)
+            return len(part)
+
+    writer = ShortWriter()
+    media_worker._write_all(writer, b"0123456789")
+    assert bytes(writer.data) == b"0123456789"
+
+
+def test_repair_checks_each_linux_partition_through_a_loop_device(monkeypatch, tmp_path) -> None:
+    card, _data = _source_card(tmp_path)
+    commands = []
+
+    def run(args, timeout=30):
+        commands.append(args)
+        return SimpleNamespace(stdout="/dev/loop7\n")
+
+    monkeypatch.setattr(media_worker, "_run", run)
+    monkeypatch.setattr(media_worker.subprocess, "run", lambda args, **_kwargs: commands.append(args) or SimpleNamespace(returncode=1, stdout="", stderr=""))
+
+    assert media_worker._repair_image(card) is True
+    assert commands[0] == ["losetup", "--find", "--show", "--offset", str(8 * 512), "--sizelimit", str(56 * 512), "--", str(card)]
+    assert commands[1] == ["e2fsck", "-fy", "/dev/loop7"]
+    assert commands[2] == ["losetup", "--detach", "/dev/loop7"]
+
+
+@pytest.mark.parametrize(("returncode", "changed"), [(0, False), (1, True), (2, True)])
+def test_repair_reports_whether_the_filesystem_changed(monkeypatch, tmp_path, returncode, changed) -> None:
+    card, _data = _source_card(tmp_path)
+    monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: SimpleNamespace(stdout="/dev/loop7\n"))
+    monkeypatch.setattr(media_worker.subprocess, "run", lambda args, **_kwargs: SimpleNamespace(returncode=returncode, stdout="", stderr=""))
+    assert media_worker._repair_image(card) is changed
+
+
+def test_repair_fails_and_detaches_when_errors_remain(monkeypatch, tmp_path) -> None:
+    card, _data = _source_card(tmp_path)
+    commands = []
+    monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: commands.append(args) or SimpleNamespace(stdout="/dev/loop7\n"))
+    monkeypatch.setattr(media_worker.subprocess, "run", lambda args, **_kwargs: SimpleNamespace(returncode=4, stdout="", stderr="bad"))
+    with pytest.raises(OSError):
+        media_worker._repair_image(card)
+    assert commands[-1] == ["losetup", "--detach", "/dev/loop7"]

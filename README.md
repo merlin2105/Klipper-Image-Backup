@@ -69,7 +69,7 @@ Der Moonraker-Status wird verwendet, um einen aktiven oder pausierten Druck zu e
 3. Melde dich bei Bedarf mit dem vorhandenen Pi-/Linux-Konto an.
 4. Wähle im Browser den Speicherort für die `.img`-Datei.
 
-KIBM liest die vollständige System-microSD und streamt das unkomprimierte Image an den Browser. Die Image-Datei wird dafür nicht erst auf der Pi-Systemkarte abgelegt. Der Browser speichert sie auf dem ausgewählten PC-Speicherort. Der Übertragungsstatus und die SHA-256-Prüfsumme werden nach Abschluss angezeigt. Dieser PC-Ablauf verkleinert das Image nicht.
+KIBM liest die System-microSD bis zum Ende der letzten Partition und streamt das unkomprimierte Image an den Browser. Das Image ist damit nie größer als die genutzte Kartenaufteilung und passt auf eine Karte derselben Größe. Die Image-Datei wird dafür nicht erst auf der Pi-Systemkarte abgelegt. Der Browser speichert sie auf dem ausgewählten PC-Speicherort. Der Übertragungsstatus und die SHA-256-Prüfsumme werden nach Abschluss angezeigt. Dieser PC-Ablauf verkleinert das Image nicht und kann das Dateisystem darin nicht nachträglich reparieren, weil es direkt zum Browser fließt. Für ein Image, das zuverlässig startet, ist die USB-Sicherung der bessere Weg.
 
 ### 2. Vollständiges Image auf einem USB-Stick sichern
 
@@ -79,7 +79,7 @@ KIBM liest die vollständige System-microSD und streamt das unkomprimierte Image
 4. Bestätige den sicheren Druckerstatus und melde dich bei Bedarf an.
 5. Starte die Sicherung und warte, bis sie fertig ist.
 
-**Die Formatierung als exFAT löscht alle bestehenden Daten auf dem ausgewählten USB-Datenträger.** KIBM prüft Datenträgeridentität und Speicherplatz erneut, bevor es schreibt. Optional kann es das Image nach dem Schreiben zurücklesen und anhand SHA-256 prüfen.
+**Die Formatierung als exFAT löscht alle bestehenden Daten auf dem ausgewählten USB-Datenträger.** KIBM prüft Datenträgeridentität und Speicherplatz erneut, bevor es schreibt. Optional kann es das Image nach dem Schreiben zurücklesen und anhand SHA-256 prüfen. Weil die Karte im laufenden Betrieb gelesen wird, schließt KIBM danach im Image das ext4-Journal ab und repariert das Dateisystem mit `e2fsck`; die angezeigte Prüfsumme gilt für das reparierte Image. Erst dann erhält die Datei ihren Namen auf `.img`. Eine abgebrochene Sicherung hinterlässt keine Datei, die wie ein gültiges Image aussieht.
 
 Die Option **Image nach der vollständigen Sicherung mit PiShrink verkleinern** erstellt auf demselben USB-Datenträger eine verkleinerte Kopie. Während der Verarbeitung müssen Platz für eine vollständige Arbeitskopie und das Original vorhanden sein. Wenn **Vollständiges Image zusätzlich behalten** nicht aktiviert ist, entfernt KIBM das vollständige Zwischen-Image erst nach erfolgreichem Shrink. Bei einem Fehler bleibt das vollständige Image erhalten. Für die optionale Verifikation liest KIBM das geschriebene Image erneut.
 

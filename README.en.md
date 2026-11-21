@@ -69,7 +69,7 @@ KIBM uses Moonraker status to detect an active or paused print. If Moonraker is 
 3. Sign in with the existing Pi/Linux account if prompted.
 4. Choose where your browser should save the `.img` file.
 
-KIBM reads the entire system microSD and streams the uncompressed image to the browser. It does not first store the image on the Pi’s system card. The browser saves it to the selected PC location. Transfer progress and the SHA-256 checksum are shown after completion. This PC workflow does not shrink the image.
+KIBM reads the system microSD up to the end of its last partition and streams the uncompressed image to the browser. The image is therefore never larger than the used card layout and fits onto a card of the same size. It does not first store the image on the Pi’s system card. The browser saves it to the selected PC location. Transfer progress and the SHA-256 checksum are shown after completion. This PC workflow does not shrink the image and cannot repair the filesystem inside it afterwards, because it flows straight to the browser. For an image that boots reliably, the USB backup is the better choice.
 
 ### 2. Back up a full image to a USB drive
 
@@ -79,7 +79,7 @@ KIBM reads the entire system microSD and streams the uncompressed image to the b
 4. Confirm the safe printer status and sign in if prompted.
 5. Start the backup and wait for it to finish.
 
-**Formatting as exFAT erases all existing data on the selected USB drive.** KIBM rechecks the drive identity and available capacity before writing. You can optionally have KIBM read the image back after writing and verify it with SHA-256.
+**Formatting as exFAT erases all existing data on the selected USB drive.** KIBM rechecks the drive identity and available capacity before writing. You can optionally have KIBM read the image back after writing and verify it with SHA-256. Because the card is read while the system runs, KIBM then completes the ext4 journal inside the image and repairs the filesystem with `e2fsck`; the checksum shown belongs to the repaired image. Only then does the file get its `.img` name. An aborted backup leaves no file that looks like a valid image.
 
 The **Shrink the full backup with PiShrink** option creates a smaller copy on the same USB drive. During processing, there must be enough room for a full working copy and the original. If **Keep the full image too** is unchecked, KIBM removes the full intermediate image only after shrinking succeeds. If shrinking fails, the full image is kept. When verification is enabled, KIBM reads the written image again.
 

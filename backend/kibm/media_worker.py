@@ -22,6 +22,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+try:
+    from . import partitions
+except ImportError:  # started as a script by systemd: load the sibling module explicitly
+    import importlib.util
+
+    _spec = importlib.util.spec_from_file_location("kibm_partitions", Path(__file__).with_name("partitions.py"))
+    partitions = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(partitions)
+
 SOCKET_PATH = Path("/run/kibm-media/worker.sock")
 VOLUME_PATH = Path("/run/kibm-media/volume")
 SCAN_PATH = Path("/run/kibm-media/scan")
@@ -35,7 +44,8 @@ CHUNK_BYTES = 4 * 1024 * 1024
 USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_BYTES = 4096
 PRINTER_RECHECK_SECONDS = 10
-BUSY_STATES = {"wird vorbereitet", "formatieren", "sichern", "verifizieren", "schrumpfen"}
+BUSY_STATES = {"wird vorbereitet", "formatieren", "sichern", "verifizieren", "reparieren", "schrumpfen"}
+E2FSCK_TIMEOUT_SECONDS = 60 * 60
 logger = logging.getLogger("kibm.media")
 
 
@@ -45,11 +55,14 @@ class MediaJob:
     state: str
     phase: str
     message: str
+    # image_size is what gets imaged (up to the end of the last partition);
+    # device_size is the whole card and must not change during the job.
     image_size: int
     source_device: str
     shrink: bool
     keep_full: bool
     verify_image: bool = True
+    device_size: int = 0
     created_at: float = field(default_factory=time.time)
     sent_bytes: int = 0
     verified_bytes: int = 0
@@ -98,6 +111,50 @@ def _disk_size(path: str) -> int:
         return struct.unpack("Q", value)[0]
     finally:
         os.close(fd)
+
+
+def _capture_size(path: str, device_size: int) -> int:
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        return partitions.capture_bytes(os.pread(fd, partitions.SECTOR_BYTES, 0), device_size)
+    finally:
+        os.close(fd)
+
+
+def _write_all(output: Any, chunk: bytes) -> None:
+    # An unbuffered write may store fewer bytes than given.
+    view = memoryview(chunk)
+    while view:
+        written = output.write(view)
+        if not written:
+            raise OSError("Der USB-Stick hat keine Daten mehr angenommen.")
+        view = view[written:]
+
+
+def _repair_image(path: Path) -> bool:
+    """Replay the journal and repair each Linux filesystem inside the image.
+
+    A live card is read while the system writes, so the captured ext4 has an
+    open journal and inconsistent bitmaps. Returns True if e2fsck changed the image.
+    """
+    with path.open("rb") as image:
+        mbr = image.read(partitions.SECTOR_BYTES)
+    changed = False
+    for offset, length in partitions.linux_partitions(mbr):
+        loop = _run([
+            "losetup", "--find", "--show", "--offset", str(offset), "--sizelimit", str(length), "--", str(path),
+        ]).stdout.strip()
+        try:
+            result = subprocess.run(
+                ["e2fsck", "-fy", loop], capture_output=True, text=True, timeout=E2FSCK_TIMEOUT_SECONDS,
+            )
+        finally:
+            _run(["losetup", "--detach", loop])
+        if result.returncode >= 4:
+            detail = (result.stderr or result.stdout or "").strip().splitlines()[-1:] or [""]
+            raise OSError(f"Das Dateisystem im Image ließ sich nicht reparieren (e2fsck {result.returncode}). {detail[0]}".strip())
+        changed = changed or result.returncode in (1, 2)
+    return changed
 
 
 def _devices(flat: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
@@ -458,6 +515,7 @@ def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
 
 def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
     full_path: Optional[Path] = None
+    part_path: Optional[Path] = None
     full_image_ready = False
     try:
         if _printer_active():
@@ -465,7 +523,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         current_device = _selected_device(device["path"])
         if current_device["major_minor"] != device["major_minor"] or current_device["size_bytes"] != device["size_bytes"]:
             raise ValueError("Der USB-Stick wurde seit der Auswahl gewechselt. Es wurde nichts formatiert.")
-        if _disk_size(SOURCE_DEVICE) != job.image_size:
+        if _disk_size(SOURCE_DEVICE) != job.device_size:
             raise ValueError("Die Größe der System-microSD hat sich geändert.")
         _check_usb_capacity(current_device, job.image_size, job.shrink)
 
@@ -483,14 +541,19 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         safe_hostname = re.sub(r"[^A-Za-z0-9._-]+", "-", hostname).strip(".-") or "klipper"
         base = f"{safe_hostname}-{stamp}-sdkarte"
         full_path = VOLUME_PATH / (f"{base}-voll.img" if job.shrink else f"{base}.img")
+        # Hidden until complete and repaired: an aborted job, a pulled stick or a
+        # power loss never leaves a file that looks like a usable image.
+        part_path = VOLUME_PATH / f".{full_path.name}.part"
         _set_job(state="sichern", phase="sichern", message="Vollständiges Karten-Image wird auf den USB-Stick geschrieben.", sent_bytes=0)
         digest = hashlib.sha256()
         next_printer_check = time.monotonic()
+        # Write pending data of the running system to the card before reading it.
+        os.sync()
         source_fd = os.open(SOURCE_DEVICE, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         try:
             if not stat.S_ISBLK(os.fstat(source_fd).st_mode):
                 raise OSError("Die System-microSD ist kein Blockgerät.")
-            with full_path.open("xb", buffering=0) as output:
+            with part_path.open("xb", buffering=0) as output:
                 copied = 0
                 while copied < job.image_size:
                     if time.monotonic() >= next_printer_check:
@@ -500,7 +563,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
                     chunk = os.read(source_fd, min(CHUNK_BYTES, job.image_size - copied))
                     if not chunk:
                         raise OSError(f"Die microSD lieferte nur {copied} von {job.image_size} Bytes.")
-                    output.write(chunk)
+                    _write_all(output, chunk)
                     digest.update(chunk)
                     copied += len(chunk)
                     _set_job(sent_bytes=copied)
@@ -508,25 +571,39 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
                 os.fsync(output.fileno())
         finally:
             os.close(source_fd)
-        _set_job(sha256=digest.hexdigest())
-
         if job.verify_image:
             _set_job(state="verifizieren", phase="verifizieren", message="Geschriebenes Image wird vom USB-Stick zurückgelesen und geprüft.")
-            if _hash_file(full_path, lambda count: _set_job(verified_bytes=count)) != digest.hexdigest():
+            if _hash_file(part_path, lambda count: _set_job(verified_bytes=count)) != digest.hexdigest():
                 raise OSError("Der SHA-256-Vergleich der geschriebenen USB-Image-Datei ist fehlgeschlagen.")
+
+        _set_job(
+            state="reparieren", phase="dateisystem", verified_bytes=0,
+            message="Journal wird abgeschlossen und das Dateisystem im Image geprüft und repariert.",
+        )
+        final_hash = digest.hexdigest()
+        if _repair_image(part_path):
+            _set_job(phase="pruefsumme", message="Prüfsumme des reparierten Images wird berechnet.")
+            final_hash = _hash_file(part_path, lambda count: _set_job(verified_bytes=count))
+        with part_path.open("rb") as image:
+            os.fsync(image.fileno())
+        part_path.rename(full_path)
+        part_path = None
+        _set_job(sha256=final_hash)
         full_image_ready = True
 
         if job.shrink:
             final_path = VOLUME_PATH / f"{base}-geshrinkt.img"
             files = [_shrink_image(job, full_path, final_path)]
             if job.keep_full:
-                files.insert(0, {"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": digest.hexdigest(), "kind": "vollständig"})
+                files.insert(0, {"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": final_hash, "kind": "vollständig"})
             else:
                 full_path.unlink()
         else:
-            files = [{"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": digest.hexdigest(), "kind": "vollständig"}]
+            files = [{"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": final_hash, "kind": "vollständig"}]
         _set_job(state="bereit", phase="fertig", message="Image ist auf dem USB-Stick gespeichert und kann heruntergeladen werden.", files=files)
     except Exception as exc:
+        if part_path is not None:
+            part_path.unlink(missing_ok=True)
         files = []
         if full_image_ready and full_path and full_path.is_file() and full_path.stat().st_size == job.image_size:
             files.append({
@@ -695,16 +772,17 @@ class MediaHandler(socketserver.StreamRequestHandler):
         if not isinstance(path, str):
             raise ValueError("USB-Ziel fehlt.")
         device = _selected_device(path)
-        image_size = _disk_size(SOURCE_DEVICE)
-        if image_size <= 0:
+        device_size = _disk_size(SOURCE_DEVICE)
+        if device_size <= 0:
             raise ValueError("Größe der System-microSD nicht verfügbar.")
+        image_size = _capture_size(SOURCE_DEVICE, device_size)
         shrink = request.get("shrink") is True
         keep_full = shrink and request.get("keep_full") is True
         _check_usb_capacity(device, image_size, shrink)
         job = MediaJob(
             job_id=secrets.token_urlsafe(20),
             state="wird vorbereitet", phase="vorbereitung", message="USB-Ziel wird geprüft.",
-            image_size=image_size, source_device=SOURCE_DEVICE, shrink=shrink, keep_full=keep_full,
+            image_size=image_size, device_size=device_size, source_device=SOURCE_DEVICE, shrink=shrink, keep_full=keep_full,
             verify_image=request.get("verify_image", True) is not False,
         )
         with _scan_lock, _lock:

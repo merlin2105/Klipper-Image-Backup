@@ -14,6 +14,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
+from . import partitions as partition_table
+
 logger = logging.getLogger(__name__)
 
 
@@ -231,6 +233,7 @@ def backup_preflight() -> dict[str, Any]:
     device = storage.get("system_device")
     supported_layout = False
     source_readable = False
+    image_size = None
     if not storage["available"] or not device:
         blockers.append("Systemlaufwerk konnte nicht eindeutig erkannt werden.")
     elif device.get("path") != "/dev/mmcblk0" or device.get("type") != "disk":
@@ -253,6 +256,10 @@ def backup_preflight() -> dict[str, Any]:
                     blockers.append("Das erkannte Systemlaufwerk ist kein Blockgerät.")
                 else:
                     source_readable = True
+                    try:
+                        image_size = partition_table.capture_bytes(os.pread(fd, partition_table.SECTOR_BYTES, 0), int(device["size_bytes"]))
+                    except (ValueError, TypeError) as exc:
+                        blockers.append(str(exc))
             finally:
                 os.close(fd)
         except OSError:
@@ -264,7 +271,7 @@ def backup_preflight() -> dict[str, Any]:
         "storage": storage,
         "blockers": blockers,
         "capture_mode": "full_raw_live_image",
-        "image_size_bytes": device.get("size_bytes") if device else None,
+        "image_size_bytes": image_size,
         "checks": {
             "printer_ready": printer["classification"] != "active",
             "system_card_supported": bool(device and device.get("path") == "/dev/mmcblk0" and supported_layout),

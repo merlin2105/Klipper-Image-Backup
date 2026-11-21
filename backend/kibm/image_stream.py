@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterator, Optional
 
-from . import services
+from . import partitions, services
 
 BLOCKGETSIZE64 = 0x80081272
 CHUNK_BYTES = 4 * 1024 * 1024
@@ -35,7 +35,9 @@ class ImageJob:
     download_token: str
     source_path: str
     source_device: int
+    # size_bytes is what gets imaged: up to the end of the last partition.
     size_bytes: int
+    device_bytes: int
     filename: str
     created_at: float = field(default_factory=time.time)
     state: str = "bereit"
@@ -88,6 +90,7 @@ def create_job(session_id: str, device: dict) -> dict:
         actual_size = _device_size(fd)
         if actual_size != device["size_bytes"]:
             raise ValueError("Die erkannte SD-Kartengröße hat sich geändert; bitte Diagnose erneut laden.")
+        capture_size = partitions.capture_bytes(os.pread(fd, partitions.SECTOR_BYTES, 0), actual_size)
         source_device = info.st_rdev
     finally:
         os.close(fd)
@@ -107,7 +110,8 @@ def create_job(session_id: str, device: dict) -> dict:
             download_token=secrets.token_urlsafe(32),
             source_path=path,
             source_device=source_device,
-            size_bytes=actual_size,
+            size_bytes=capture_size,
+            device_bytes=actual_size,
             filename=f"{safe_hostname}-{datetime.now().strftime('%Y%m%d-%H%M%S')}-sdkarte.img",
         )
         _jobs[job_id] = job
@@ -165,9 +169,11 @@ def stream_job(job: ImageJob) -> Iterator[bytes]:
         if job.state != "bereit":
             raise OSError("Der Image-Auftrag ist nicht mehr bereit.")
     try:
+        # Write pending data of the running system to the card before reading it.
+        os.sync()
         fd = os.open(job.source_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         info = os.fstat(fd)
-        if not stat.S_ISBLK(info.st_mode) or info.st_rdev != job.source_device or _device_size(fd) != job.size_bytes:
+        if not stat.S_ISBLK(info.st_mode) or info.st_rdev != job.source_device or _device_size(fd) != job.device_bytes:
             raise OSError("Identität oder Größe der microSD hat sich vor dem Lesen geändert.")
         with _lock:
             job.state = "streaming"

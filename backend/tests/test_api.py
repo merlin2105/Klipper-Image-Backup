@@ -35,6 +35,34 @@ def test_preflight_requires_supported_source_and_does_not_claim_recovery(monkeyp
     assert result["safe_to_prepare_recovery"] is False
 
 
+def _mbr_ending_at(end_sector: int, signature: bytes = b"\x55\xaa") -> bytes:
+    import struct
+    mbr = bytearray(512)
+    mbr[446 + 4] = 0x0C
+    struct.pack_into("<II", mbr, 446 + 8, 8192, 524288)
+    mbr[462 + 4] = 0x83
+    struct.pack_into("<II", mbr, 462 + 8, 532480, end_sector - 532480)
+    mbr[510:512] = signature
+    return bytes(mbr)
+
+
+def test_preflight_blocks_an_unreadable_partition_table(monkeypatch) -> None:
+    monkeypatch.setattr(services, "klipper_status", lambda: {"safe_to_backup": True, "classification": "ready"})
+    disk = {"path": "/dev/mmcblk0", "type": "disk", "size_bytes": 32_000_000_000}
+    parts = [
+        {"path": "/dev/mmcblk0p1", "parent": "/dev/mmcblk0", "mountpoints": ["/boot"], "filesystem": "vfat"},
+        {"path": "/dev/mmcblk0p2", "parent": "/dev/mmcblk0", "mountpoints": ["/"], "filesystem": "ext4"},
+    ]
+    monkeypatch.setattr(services, "storage_info", lambda: {"available": True, "system_device": disk, "devices": parts})
+    monkeypatch.setattr(services.os, "open", lambda *args, **kwargs: 9)
+    monkeypatch.setattr(services.os, "fstat", lambda _fd: SimpleNamespace(st_mode=stat.S_IFBLK))
+    monkeypatch.setattr(services.os, "close", lambda _fd: None)
+    monkeypatch.setattr(services.os, "pread", lambda _fd, _count, _offset: _mbr_ending_at(62333952, b"\0\0"))
+    result = services.backup_preflight()
+    assert result["backup_available"] is False
+    assert any("Partitionstabelle" in blocker for blocker in result["blockers"])
+
+
 def test_preflight_allows_supported_idle_micro_sd(monkeypatch) -> None:
     monkeypatch.setattr(services, "klipper_status", lambda: {"safe_to_backup": True, "classification": "ready"})
     disk = {"path": "/dev/mmcblk0", "type": "disk", "size_bytes": 32_000_000_000}
@@ -46,9 +74,11 @@ def test_preflight_allows_supported_idle_micro_sd(monkeypatch) -> None:
     monkeypatch.setattr(services.os, "open", lambda *args, **kwargs: 9)
     monkeypatch.setattr(services.os, "fstat", lambda _fd: SimpleNamespace(st_mode=stat.S_IFBLK))
     monkeypatch.setattr(services.os, "close", lambda _fd: None)
+    monkeypatch.setattr(services.os, "pread", lambda _fd, _count, _offset: _mbr_ending_at(62333952))
     result = services.backup_preflight()
     assert result["backup_available"] is True
-    assert result["image_size_bytes"] == 32_000_000_000
+    # Only up to the end of the last partition, not the whole 32 GB card.
+    assert result["image_size_bytes"] == 31_914_983_424
     assert result["checks"] == {"printer_ready": True, "system_card_supported": True, "read_access": True}
 
 

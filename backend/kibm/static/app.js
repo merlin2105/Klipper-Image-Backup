@@ -961,6 +961,15 @@ async function pollUsbJob() {
       $("backup-progress-title").textContent = "Image auf dem USB-Stick wird geprüft";
       showMeasuredProgress(status.verified_bytes, status.image_size_bytes);
       $("backup-progress-detail").textContent = `${formatBytes(status.verified_bytes)} von ${formatBytes(status.image_size_bytes)} für SHA-256 gelesen.`;
+    } else if (status.state === "reparieren") {
+      $("backup-progress-title").textContent = "Dateisystem im Image wird repariert";
+      if (status.phase === "pruefsumme") {
+        showMeasuredProgress(status.verified_bytes, status.image_size_bytes);
+        $("backup-progress-detail").textContent = `${status.message} ${formatBytes(status.verified_bytes)} von ${formatBytes(status.image_size_bytes)}.`;
+      } else {
+        $("backup-progress-value").textContent = "e2fsck";
+        $("backup-progress-bar").removeAttribute("value");
+      }
     } else if (status.state === "formatieren") {
       $("backup-progress-title").textContent = "USB-Stick wird vorbereitet";
       $("backup-progress-value").textContent = "exFAT";
