@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -406,3 +407,54 @@ def test_repair_fails_and_detaches_when_errors_remain(monkeypatch, tmp_path) -> 
     with pytest.raises(OSError):
         media_worker._repair_image(card)
     assert commands[-1] == ["losetup", "--detach", "/dev/loop7"]
+
+
+# --- PiShrink ---------------------------------------------------------------
+
+def _shrink_setup(monkeypatch, tmp_path, pishrink_output):
+    volume = tmp_path / "volume"
+    volume.mkdir()
+    full = volume / "card.img"
+    full.write_bytes(b"x" * 4096)
+    commands = []
+
+    def run(args, timeout=30):
+        commands.append(args)
+        Path(args[-1]).write_bytes(b"x" * 1024)
+        return SimpleNamespace(stdout=pishrink_output)
+
+    job = media_worker.MediaJob(
+        job_id="job-1", state="schrumpfen", phase="kopie", message="", image_size=4096,
+        source_device="/dev/mmcblk0", shrink=True, keep_full=True,
+    )
+    monkeypatch.setattr(media_worker, "_job", job)
+    monkeypatch.setattr(media_worker, "VOLUME_PATH", volume)
+    monkeypatch.setattr(media_worker, "_run", run)
+    return job, full, volume / "card-geshrinkt.img", commands
+
+
+def test_shrink_enables_first_boot_expansion(monkeypatch, tmp_path) -> None:
+    # Without expansion the shrunk root keeps less free space than ext4 reserves
+    # for root, so Moonraker and KlipperScreen fail on the restored card.
+    job, full, final, commands = _shrink_setup(monkeypatch, tmp_path, "pishrink.sh: Creating new /etc/rc.local\n")
+
+    media_worker._shrink_image(job, full, final)
+
+    (pishrink,) = commands
+    assert pishrink[0] == str(media_worker.PISHRINK_PATH)
+    assert "-s" not in pishrink[1] and "o" not in pishrink[1].lstrip("-")
+    assert final.stat().st_size == 1024
+
+
+@pytest.mark.parametrize("output", [
+    "pishrink.sh: Unable to mount loopback, autoexpand will not be enabled\n",
+    "pishrink.sh: /etc not found, autoexpand will not be enabled\n",
+    "WARNING: PiShrink does not yet support autoexpanding of this type of image\n",
+])
+def test_shrink_fails_when_first_boot_expansion_is_missing(monkeypatch, tmp_path, output) -> None:
+    job, full, final, _ = _shrink_setup(monkeypatch, tmp_path, output)
+
+    with pytest.raises(OSError):
+        media_worker._shrink_image(job, full, final)
+    assert not final.exists()
+    assert full.exists()

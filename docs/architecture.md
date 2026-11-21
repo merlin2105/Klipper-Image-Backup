@@ -12,7 +12,7 @@ flowchart LR
   Service -->|Fixed USB/image protocol over Unix socket| Media[Root media worker]
   Media -->|Read-only capture| Source[System microSD]
   Media -->|exFAT staging image| USB[Explicitly selected USB drive]
-  Media -->|Optional offline shrink of image copy| PiShrink[PiShrink]
+  Media -->|Optional shrink of image copy| PiShrink[PiShrink]
   Broker -. after hardware prototype .-> Recovery[RAM recovery environment]
   Recovery -. future source offline/read-only .-> Source
   Media -->|Optional USB image download over HTTPS| Browser
@@ -48,7 +48,7 @@ The future recovery state machine is not implemented. The current image flow sto
 
 ### Image strategy
 
-PC mode is always a raw copy of the full source card. USB mode first creates the same full raw copy on the USB target. When requested, PiShrink works offline on an image file, so the ext4 root in the running system stays mounted and unchanged. PiShrink is invoked with `-s` to avoid inserting first-boot root expansion code into the captured image. The shrink result is kept separate until it passes a size and SHA-256 check; the full staging image is removed only after that success and only when the keep-full option is unchecked. This requires enough USB capacity for two full-card files during shrink; the UI checks the target capacity before formatting. The device and its existing contents are changed only after the authenticated user explicitly confirms formatting.
+PC mode is always a raw copy of the full source card. USB mode first creates the same full raw copy on the USB target. When requested, PiShrink works on a copy of the image file, so the ext4 root in the running system stays mounted and unchanged. PiShrink mounts that copy and installs its one-time `/etc/rc.local` first-boot expansion: the shrunk filesystem keeps less free space than ext4 reserves for root, so without expansion Moonraker and KlipperScreen fail on the restored card. The shrink fails if PiShrink reports that it could not set up the expansion. The shrink result is kept separate until it passes a size and SHA-256 check; the full staging image is removed only after that success and only when the keep-full option is unchecked. This requires enough USB capacity for two full-card files during shrink; the UI checks the target capacity before formatting. The device and its existing contents are changed only after the authenticated user explicitly confirms formatting.
 
 Never shrink the mounted live root. Never run destructive tools against a source device until its identity and operation plan have been displayed and separately confirmed.
 

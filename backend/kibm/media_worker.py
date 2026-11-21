@@ -464,7 +464,11 @@ def _shrink_image(job: MediaJob, full_path: Path, final_path: Path) -> dict[str,
     try:
         _copy_for_shrink(full_path, working_path)
         _set_job(phase="verkleinern", message="PiShrink prüft und verkleinert Dateisystem und Partition.")
-        _run([str(PISHRINK_PATH), "-nso", str(working_path)], timeout=60 * 60 * 4)
+        # PiShrink leaves only a few MB free, less than ext4 reserves for root, so the
+        # restored card must grow its root partition on first boot (PiShrink autoexpand).
+        result = _run([str(PISHRINK_PATH), "-n", str(working_path)], timeout=60 * 60 * 4)
+        if "autoexpand will not be enabled" in result.stdout or "does not yet support autoexpanding" in result.stdout:
+            raise OSError("PiShrink konnte die automatische Vergrößerung beim ersten Start nicht einrichten.")
         final_size = working_path.stat().st_size
         if not 0 < final_size < job.image_size:
             raise OSError("PiShrink hat kein kleineres, gültiges Image erzeugt.")
