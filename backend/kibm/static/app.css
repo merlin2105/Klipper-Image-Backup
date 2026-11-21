@@ -160,3 +160,5 @@ h1{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.04em;font-weight
 .language-option:focus-visible{outline:2px solid var(--acid);outline-offset:2px}
 .language-flag{display:block;width:18px;height:12px;flex:none;border-radius:2px;box-shadow:0 0 0 1px #69746d}
 @media(max-width:680px){.page-heading-tools{justify-content:space-between;gap:8px;margin:17px 0 0}.page-heading-tools .read-only-stamp{padding:8px 10px}}
+/* Wide screens: system and storage tiles in one row, no scrolling needed. */
+@media(min-width:1440px){.overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.35fr);column-gap:14px;margin-bottom:34px}.overview>.system-grid,.overview>.storage-layout{display:contents}.overview>.section-head{grid-row:1;grid-column:span 2}.overview .panel{grid-row:2;min-height:0;padding:16px 16px}.overview .partition-table-wrap table{min-width:0}.overview th,.overview td{padding-left:5px;padding-right:5px}.overview th{letter-spacing:.02em}}
