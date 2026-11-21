@@ -116,3 +116,23 @@ def test_requires_a_trusted_key(setup) -> None:
     result = _fetch(repo, empty, tmp_path / "out")
     assert result.returncode != 0
     assert "Release-Schlüssel" in result.stderr
+
+
+def test_does_not_need_git_ssh_signature_support() -> None:
+    # Pis on Debian 11 ship git 2.30, which rejects gpg.format=ssh; verify with ssh-keygen instead.
+    assert "verify-tag" not in SCRIPT.read_text()
+
+
+def test_rejects_signed_tag_whose_content_was_changed(setup) -> None:
+    repo, key, signers, tmp_path = setup
+    repo.release("0.3.0", "v0.3.0", key=key)
+    forged = repo.git("cat-file", "tag", "v0.3.0").replace("\n\nv0.3.0\n", "\n\nv0.3.0 forged\n", 1) + "\n"
+    forged_id = subprocess.run(["git", "-C", str(repo.path), "hash-object", "-t", "tag", "-w", "--stdin"],
+                               input=forged, check=True, capture_output=True, text=True, env=GIT_ENV).stdout.strip()
+    repo.git("update-ref", "refs/tags/v0.3.0", forged_id)
+
+    result = _fetch(repo, signers, tmp_path / "out")
+
+    assert result.returncode != 0
+    assert "Signatur" in result.stderr
+    assert not (tmp_path / "out").exists()

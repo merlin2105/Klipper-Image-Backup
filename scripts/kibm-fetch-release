@@ -37,9 +37,28 @@ work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 git init -q "$work/repo"
 git -C "$work/repo" fetch -q --depth 1 --no-tags "$repository" "refs/tags/$tag:refs/tags/$tag"
-if [[ $(git -C "$work/repo" cat-file -t "refs/tags/$tag") != tag ]] \
-  || ! git -C "$work/repo" cat-file tag "refs/tags/$tag" | grep -qx -- '-----BEGIN SSH SIGNATURE-----' \
-  || ! git -C "$work/repo" -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$signers" verify-tag "refs/tags/$tag" >/dev/null 2>&1; then
+# Debian 11 ships git 2.30, which cannot verify SSH signatures, so the signed
+# tag payload is checked with ssh-keygen directly (as git does internally).
+verify_signature() {
+  [[ $(git -C "$work/repo" cat-file -t "refs/tags/$tag") == tag ]] || return 1
+  git -C "$work/repo" cat-file tag "refs/tags/$tag" > "$work/tag"
+  python3 - "$work/tag" "$work/payload" "$work/signature" <<'PY' || return 1
+import sys
+
+data = open(sys.argv[1], "rb").read()
+marker = b"\n-----BEGIN SSH SIGNATURE-----\n"
+start = data.find(marker)
+if start < 0 or not data.endswith(b"-----END SSH SIGNATURE-----\n"):
+    sys.exit(1)
+open(sys.argv[2], "wb").write(data[:start + 1])
+open(sys.argv[3], "wb").write(data[start + 1:])
+PY
+  local principal
+  principal=$(ssh-keygen -Y find-principals -s "$work/signature" -f "$signers" 2>/dev/null | head -n 1) || return 1
+  [[ -n $principal ]] || return 1
+  ssh-keygen -Y verify -f "$signers" -I "$principal" -n git -s "$work/signature" < "$work/payload" >/dev/null 2>&1
+}
+if ! verify_signature; then
   echo "Die Signatur des Release-Tags $tag ist ungültig oder stammt nicht vom hinterlegten Schlüssel." >&2
   exit 1
 fi
