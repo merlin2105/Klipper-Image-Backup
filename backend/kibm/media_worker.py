@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import grp
 import json
@@ -40,6 +41,8 @@ UPDATE_COMMIT_PATH = Path("/run/kibm-media/update-commit")
 SOURCE_DEVICE = "/dev/mmcblk0"
 PISHRINK_PATH = Path("/opt/klipper-image-backup-manager/tools/pishrink.sh")
 BLOCKGETSIZE64 = 0x80081272
+FIFREEZE = 0xC0045877
+FITHAW = 0xC0045878
 CHUNK_BYTES = 4 * 1024 * 1024
 USB_FORMAT_HEADROOM_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_BYTES = 4096
@@ -129,6 +132,25 @@ def _write_all(output: Any, chunk: bytes) -> None:
         if not written:
             raise OSError("Der USB-Stick hat keine Daten mehr angenommen.")
         view = view[written:]
+
+
+def _flush_root_journal() -> None:
+    """Write the ext4 journal of the running root filesystem back to its home blocks.
+
+    sync only commits changes to the journal; ext4 may leave them there for a long
+    time. A raw copy that reads home blocks and journal at different moments can
+    then lose recent changes (e.g. a KIBM update) when e2fsck repairs the image.
+    Freezing flushes the journal; the root filesystem is thawed right away.
+    """
+    root_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        try:
+            fcntl.ioctl(root_fd, FIFREEZE, 0)
+        except OSError as exc:
+            raise OSError(f"Das Journal der System-microSD konnte nicht abgeschlossen werden ({exc.strerror}).") from exc
+        fcntl.ioctl(root_fd, FITHAW, 0)
+    finally:
+        os.close(root_fd)
 
 
 def _repair_image(path: Path) -> bool:
@@ -553,6 +575,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         next_printer_check = time.monotonic()
         # Write pending data of the running system to the card before reading it.
         os.sync()
+        _flush_root_journal()
         source_fd = os.open(SOURCE_DEVICE, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         try:
             if not stat.S_ISBLK(os.fstat(source_fd).st_mode):

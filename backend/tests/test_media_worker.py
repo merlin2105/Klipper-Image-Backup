@@ -285,7 +285,11 @@ def _capture_env(monkeypatch, tmp_path, card, *, repair=lambda _path: False, dev
     monkeypatch.setattr(media_worker, "_format_usb", lambda _device: calls.append("format"))
     monkeypatch.setattr(media_worker, "_repair_image", lambda path: calls.append("repair") or repair(path))
     monkeypatch.setattr(media_worker.os, "sync", lambda: calls.append("sync"))
-    device = {"path": "/dev/sdz", "major_minor": "8:0", "size_bytes": 10 ** 9}
+    monkeypatch.setattr(
+        media_worker, "_flush_root_journal",
+        lambda: calls.append("flush" if not any(volume.glob(".*.part")) else "flush-too-late"),
+    )
+    device ={"path": "/dev/sdz", "major_minor": "8:0", "size_bytes": 10 ** 9}
     monkeypatch.setattr(media_worker, "_selected_device", lambda _path: device)
     return volume, device, calls
 
@@ -318,7 +322,25 @@ def test_usb_capture_writes_only_the_partitions_and_leaves_no_partial_file(monke
     written = (volume / images[0]).read_bytes()
     assert written == data[:64 * 512]
     assert job.files[0]["sha256"] == hashlib.sha256(written).hexdigest()
-    assert calls.index("sync") < calls.index("repair")
+    assert calls.index("sync") < calls.index("flush") < calls.index("repair")
+
+
+def test_flush_root_journal_freezes_and_thaws_the_root_filesystem(monkeypatch) -> None:
+    # sync only commits to the ext4 journal; freezing writes the journal back to its
+    # home blocks, so a raw copy of the card no longer depends on the journal.
+    calls = []
+    monkeypatch.setattr(media_worker.fcntl, "ioctl", lambda fd, request, arg=0: calls.append(request))
+    media_worker._flush_root_journal()
+    assert calls == [media_worker.FIFREEZE, media_worker.FITHAW]
+
+
+def test_flush_root_journal_failure_stops_the_backup(monkeypatch) -> None:
+    def ioctl(fd, request, arg=0):
+        raise OSError(1, "Operation not permitted")
+
+    monkeypatch.setattr(media_worker.fcntl, "ioctl", ioctl)
+    with pytest.raises(OSError, match="Journal"):
+        media_worker._flush_root_journal()
 
 
 def test_repaired_image_gets_the_checksum_of_the_repaired_file(monkeypatch, tmp_path) -> None:
