@@ -7,6 +7,30 @@ import pytest
 from kibm import media_worker
 
 
+class _PrinterStatus:
+    def __init__(self):
+        self.updates = []
+
+    def update(self, job):
+        self.updates.append(job)
+
+
+@pytest.fixture(autouse=True)
+def _printer_status(monkeypatch):
+    # Worker tests must never talk to a real Moonraker.
+    status = _PrinterStatus()
+    monkeypatch.setattr(media_worker, "PRINTER_STATUS", status, raising=False)
+    return status
+
+
+def test_job_changes_reach_the_printer_status(monkeypatch, _printer_status):
+    job = media_worker.MediaJob("j1", "sichern", "sichern", "", 100, "/dev/x", False, False)
+    monkeypatch.setattr(media_worker, "_job", job)
+    media_worker._set_job(sent_bytes=40)
+    assert _printer_status.updates[-1] == media_worker._job_data(job)
+    assert _printer_status.updates[-1]["sent_bytes"] == 40
+
+
 def _handler(monkeypatch, tmp_path, run):
     replies = []
     monkeypatch.setattr(media_worker, "_job", None)
@@ -427,7 +451,7 @@ def test_repair_checks_each_linux_partition_through_a_loop_device(monkeypatch, t
         return SimpleNamespace(stdout="/dev/loop7\n")
 
     monkeypatch.setattr(media_worker, "_run", run)
-    monkeypatch.setattr(media_worker.subprocess, "run", lambda args, **_kwargs: commands.append(args) or SimpleNamespace(returncode=1, stdout="", stderr=""))
+    monkeypatch.setattr(media_worker, "_run_cancellable", lambda args, **_kwargs: commands.append(args) or SimpleNamespace(returncode=1, stdout="", stderr=""))
 
     assert media_worker._repair_image(card) is True
     assert commands[0] == ["losetup", "--find", "--show", "--offset", str(8 * 512), "--sizelimit", str(56 * 512), "--", str(card)]
@@ -439,7 +463,7 @@ def test_repair_checks_each_linux_partition_through_a_loop_device(monkeypatch, t
 def test_repair_reports_whether_the_filesystem_changed(monkeypatch, tmp_path, returncode, changed) -> None:
     card, _data = _source_card(tmp_path)
     monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: SimpleNamespace(stdout="/dev/loop7\n"))
-    monkeypatch.setattr(media_worker.subprocess, "run", lambda args, **_kwargs: SimpleNamespace(returncode=returncode, stdout="", stderr=""))
+    monkeypatch.setattr(media_worker, "_run_cancellable", lambda args, **_kwargs: SimpleNamespace(returncode=returncode, stdout="", stderr=""))
     assert media_worker._repair_image(card) is changed
 
 
@@ -447,7 +471,7 @@ def test_repair_fails_and_detaches_when_errors_remain(monkeypatch, tmp_path) -> 
     card, _data = _source_card(tmp_path)
     commands = []
     monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: commands.append(args) or SimpleNamespace(stdout="/dev/loop7\n"))
-    monkeypatch.setattr(media_worker.subprocess, "run", lambda args, **_kwargs: SimpleNamespace(returncode=4, stdout="", stderr="bad"))
+    monkeypatch.setattr(media_worker, "_run_cancellable", lambda args, **_kwargs: SimpleNamespace(returncode=4, stdout="", stderr="bad"))
     with pytest.raises(OSError):
         media_worker._repair_image(card)
     assert commands[-1] == ["losetup", "--detach", "/dev/loop7"]
@@ -462,7 +486,7 @@ def _shrink_setup(monkeypatch, tmp_path, pishrink_output):
     full.write_bytes(b"x" * 4096)
     commands = []
 
-    def run(args, timeout=30):
+    def run(args, timeout=30, check=False):
         commands.append(args)
         Path(args[-1]).write_bytes(b"x" * 1024)
         return SimpleNamespace(stdout=pishrink_output)
@@ -473,7 +497,7 @@ def _shrink_setup(monkeypatch, tmp_path, pishrink_output):
     )
     monkeypatch.setattr(media_worker, "_job", job)
     monkeypatch.setattr(media_worker, "VOLUME_PATH", volume)
-    monkeypatch.setattr(media_worker, "_run", run)
+    monkeypatch.setattr(media_worker, "_run_cancellable", run)
     return job, full, volume / "card-geshrinkt.img", commands
 
 
@@ -788,12 +812,12 @@ def test_shrink_working_copy_lives_next_to_the_full_image(monkeypatch, tmp_path)
     full = directory / "a.img"
     full.write_bytes(b"x" * 100)
 
-    def run(args, timeout=30):
+    def run(args, timeout=30, check=False):
         seen.append(Path(args[-1]))
         Path(args[-1]).write_bytes(b"x" * 10)
         return SimpleNamespace(stdout="")
 
-    monkeypatch.setattr(media_worker, "_run", run)
+    monkeypatch.setattr(media_worker, "_run_cancellable", run)
     job = _media_job(100, 100)
     result = media_worker._shrink_image(job, full, directory / "a-geshrinkt.img")
     assert seen[0].parent == directory
@@ -974,8 +998,143 @@ def test_worker_loads_as_a_plain_script_like_systemd_starts_it() -> None:
     result = subprocess.run(
         [sys.executable, "-I", "-c",
          "import runpy, sys; ns = runpy.run_path(sys.argv[1], run_name='kibm_worker_check'); "
-         "assert ns['nas'].NasConfig('h', 'S', 'u', '', '').display() == '//h/S'",
+         "assert ns['nas'].NasConfig('h', 'S', 'u', '', '').display() == '//h/S'; "
+         "assert ns['printer_status'].status_text({'phase': 'fertig'}) == 'KIBM: Sicherung fertig'",
          str(script)],
         capture_output=True, text=True, timeout=30, cwd="/",
     )
     assert result.returncode == 0, result.stderr
+
+
+# --- Cancel -------------------------------------------------------------------
+
+def _cancel_after(monkeypatch, field, after=1):
+    """Request a cancel once the job has reported `field` progress `after` times."""
+    real = media_worker._set_job
+    seen = []
+
+    def set_job(**values):
+        real(**values)
+        if field in values:
+            seen.append(values[field])
+            if len(seen) == after:
+                media_worker._job.cancel_requested = True
+
+    monkeypatch.setattr(media_worker, "_set_job", set_job)
+
+
+def test_cancel_request_marks_only_the_running_job(monkeypatch) -> None:
+    job = _media_job(100, 100)
+    job.state = "sichern"
+    handler = media_worker.MediaHandler.__new__(media_worker.MediaHandler)
+    replies = []
+    handler._reply = replies.append
+    with pytest.raises(ValueError):
+        handler._cancel({"job_id": "other"})
+    handler._cancel({"job_id": "job"})
+    assert job.cancel_requested and replies[-1]["job"]["cancel_requested"] is True
+    job.state = "bereit"
+    job.cancel_requested = False
+    with pytest.raises(ValueError):
+        handler._cancel({"job_id": "job"})
+    assert not job.cancel_requested
+
+
+def test_cancel_while_writing_removes_the_partial_image(monkeypatch, tmp_path) -> None:
+    card, data = _source_card(tmp_path)
+    volume, device, calls = _capture_env(monkeypatch, tmp_path, card)
+    monkeypatch.setattr(media_worker, "CHUNK_BYTES", 512)
+    _cancel_after(monkeypatch, "sent_bytes", after=3)
+    job = _media_job(64 * 512, len(data))
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "abgebrochen" and job.phase == "abgebrochen"
+    assert job.error is None and job.files == []
+    assert job.sent_bytes < 64 * 512
+    assert list(volume.iterdir()) == []
+    assert "repair" not in calls
+
+
+def test_cancel_while_verifying_removes_the_partial_image(monkeypatch, tmp_path) -> None:
+    card, data = _source_card(tmp_path)
+    volume, device, _calls = _capture_env(monkeypatch, tmp_path, card)
+    _cancel_after(monkeypatch, "verified_bytes")
+    job = _media_job(64 * 512, len(data))
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "abgebrochen"
+    assert list(volume.iterdir()) == []
+
+
+def test_cancel_before_writing_starts_nothing(monkeypatch, tmp_path) -> None:
+    card, data = _source_card(tmp_path)
+    volume, device, calls = _capture_env(monkeypatch, tmp_path, card)
+    job = _media_job(64 * 512, len(data))
+    job.cancel_requested = True
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "abgebrochen"
+    assert "sync" not in calls and list(volume.iterdir()) == []
+
+
+def test_cancel_while_shrinking_keeps_the_finished_full_image(monkeypatch, tmp_path) -> None:
+    card, data = _source_card(tmp_path)
+    volume, device, _calls = _capture_env(monkeypatch, tmp_path, card)
+    monkeypatch.setattr(media_worker, "CHUNK_BYTES", 512)
+    _cancel_after(monkeypatch, "shrink_bytes")
+    job = _media_job(64 * 512, len(data))
+    job.shrink = True
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "abgebrochen"
+    (image,) = volume.iterdir()
+    assert image.name.endswith("-voll.img") and image.stat().st_size == 64 * 512
+    assert [item["filename"] for item in job.files] == [image.name]
+
+
+def test_nas_cancel_unmounts_and_leaves_nothing(monkeypatch, tmp_path) -> None:
+    _handler_, _replies, state, share, job, config, _data = _nas_capture(monkeypatch, tmp_path)
+    monkeypatch.setattr(media_worker, "CHUNK_BYTES", 512)
+    _cancel_after(monkeypatch, "sent_bytes")
+    media_worker._run_nas_job(job, config, "printer")
+    assert job.state == "abgebrochen"
+    assert not list((share / "f").iterdir())
+    assert not state["mounted"]
+
+
+def test_cancellable_run_stops_the_process_group(monkeypatch) -> None:
+    job = _media_job(100, 100)
+    timer = media_worker.threading.Timer(0.3, lambda: setattr(job, "cancel_requested", True))
+    timer.start()
+    started = media_worker.time.monotonic()
+    with pytest.raises(media_worker.JobCancelled):
+        media_worker._run_cancellable(["sh", "-c", "sleep 30 & sleep 30"], timeout=60, poll_seconds=0.1)
+    assert media_worker.time.monotonic() - started < 10
+
+
+def test_cancellable_run_returns_output_and_checks_exit_code() -> None:
+    _media_job(100, 100)
+    result = media_worker._run_cancellable(["sh", "-c", "echo hi"], timeout=10)
+    assert result.returncode == 0 and result.stdout == "hi\n"
+    with pytest.raises(subprocess.CalledProcessError):
+        media_worker._run_cancellable(["sh", "-c", "exit 3"], timeout=10, check=True)
+
+
+def test_cancelled_pishrink_detaches_its_loop_devices(monkeypatch, tmp_path) -> None:
+    job, full, final, _ = _shrink_setup(monkeypatch, tmp_path, "")
+    detached = []
+
+    def cancelled(args, timeout, check=False):
+        raise media_worker.JobCancelled()
+
+    monkeypatch.setattr(media_worker, "_run_cancellable", cancelled)
+    monkeypatch.setattr(media_worker, "_detach_loops", detached.append)
+    with pytest.raises(media_worker.JobCancelled):
+        media_worker._shrink_image(job, full, final)
+    assert detached == [full.parent / f".{job.job_id}.img.part"]
+    assert not final.exists() and full.exists()
+    assert not detached[0].exists()

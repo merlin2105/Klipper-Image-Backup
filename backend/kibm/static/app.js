@@ -1008,6 +1008,10 @@ async function pollUsbJob() {
     const status = await api(`/api/backup/usb/jobs/${activeJobId}`);
     const onNas = status.target === "nas";
     $("backup-progress-detail").textContent = status.error || status.message;
+    const cancel = $("job-cancel");
+    cancel.hidden = !RUNNING_JOB_STATES.includes(status.state) || !csrfToken;
+    cancel.disabled = Boolean(status.cancel_requested);
+    cancel.textContent = status.cancel_requested ? "Wird abgebrochen …" : "Vorgang abbrechen";
     if (status.state === "sichern") {
       const percent = status.image_size_bytes ? Math.min(100, status.sent_bytes / status.image_size_bytes * 100) : 0;
       $("backup-progress-title").textContent = onNas ? "Vollständiges Image wird auf das NAS gesichert" : "Vollständiges Image wird auf USB gesichert";
@@ -1066,6 +1070,16 @@ async function pollUsbJob() {
       activeJobId = null;
       updateDestination();
       return;
+    } else if (status.state === "abgebrochen") {
+      $("backup-progress-title").textContent = destination === "existing" ? "Verkleinern abgebrochen" : onNas ? "NAS-Sicherung abgebrochen" : "USB-Sicherung abgebrochen";
+      $("backup-progress-value").textContent = "Abgebrochen";
+      $("backup-progress-bar").removeAttribute("value");
+      if ((status.files || []).length) renderUsbFiles(status.files, usbJobId, activeDownloadToken, onNas);
+      $("usb-eject").hidden = onNas;
+      if (onNas) loadNasImages();
+      activeJobId = null;
+      updateDestination();
+      return;
     } else if (status.state === "wird vorbereitet") {
       $("backup-progress-title").textContent = onNas ? "NAS-Verbindung wird geprüft" : "USB-Ziel wird geprüft";
       $("backup-progress-value").textContent = "—";
@@ -1078,6 +1092,23 @@ async function pollUsbJob() {
     transferPoll = window.setTimeout(pollTransfer, 3000);
   }
 }
+
+const CANCEL_QUESTION = "Laufenden Vorgang abbrechen? Unvollständige Dateien werden gelöscht, vorhandene Sicherungen bleiben erhalten.";
+const RUNNING_JOB_STATES = ["wird vorbereitet", "formatieren", "sichern", "verifizieren", "reparieren", "schrumpfen"];
+
+$("job-cancel").addEventListener("click", async () => {
+  const jobId = activeJobId;
+  if (!jobId || !window.confirm(window.KIBM_I18N?.translate(CANCEL_QUESTION) || CANCEL_QUESTION)) return;
+  const button = $("job-cancel");
+  button.disabled = true;
+  try {
+    await api(`/api/backup/usb/jobs/${jobId}/cancel`, { method: "POST" });
+    button.textContent = "Wird abgebrochen …";
+  } catch (error) {
+    button.disabled = false;
+    $("backup-progress-detail").textContent = error.message;
+  }
+});
 
 function renderUsbFiles(files, jobId, token, onNas = false) {
   const container = $("usb-results");

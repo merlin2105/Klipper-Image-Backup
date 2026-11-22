@@ -437,3 +437,20 @@ def test_nas_timeout_gets_a_readable_message(monkeypatch) -> None:
     response = logged_in.post("/api/backup/nas/images", json={}, headers={**ORIGIN, "X-KIBM-CSRF": csrf})
     assert response.status_code == 409
     assert response.json()["detail"] == "Das NAS hat zu lange nicht geantwortet. Prüfe den Status mit „Erneut prüfen“."
+
+
+def test_usb_cancel_needs_csrf_and_the_own_job(monkeypatch) -> None:
+    calls = []
+    job = {"job_id": "job-1", "state": "sichern", "cancel_requested": True}
+    monkeypatch.setattr(main, "sessions", {})
+    monkeypatch.setattr(main, "usb_jobs", {})
+    monkeypatch.setattr(main, "_media_request", lambda payload: calls.append(payload) or {"job": job})
+    logged_in, csrf = _logged_in_client(monkeypatch)
+    url = "/api/backup/usb/jobs/job-1/cancel"
+
+    assert logged_in.post(url, headers={**ORIGIN, "X-KIBM-CSRF": csrf}).status_code == 404
+    logged_in.get("/api/backup/usb/current")
+    assert logged_in.post(url, headers=ORIGIN).status_code == 403
+    response = logged_in.post(url, headers={**ORIGIN, "X-KIBM-CSRF": csrf})
+    assert response.status_code == 200 and response.json()["cancel_requested"] is True
+    assert {"action": "cancel", "job_id": "job-1"} in calls

@@ -513,6 +513,17 @@ def usb_backup_status(job_id: str, request: Request):
     return result["job"]
 
 
+@app.post("/api/backup/usb/jobs/{job_id}/cancel")
+def cancel_usb_backup(job_id: str, request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    session_id, _ = _require_csrf(request, x_kibm_csrf)
+    if session_id not in usb_jobs.get(job_id, {}):
+        raise HTTPException(status_code=404, detail="Auftrag nicht gefunden.")
+    try:
+        return _media_request({"action": "cancel", "job_id": job_id})["job"]
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc) or "Auftrag konnte nicht abgebrochen werden.") from exc
+
+
 @app.get("/api/backup/usb/download/{job_id}/{filename}")
 def download_usb_image(job_id: str, filename: str, request: Request, token: str):
     session_id, _ = _session(request)
@@ -521,7 +532,7 @@ def download_usb_image(job_id: str, filename: str, request: Request, token: str)
         raise HTTPException(status_code=404, detail="USB-Image-Download nicht gefunden.")
     try:
         status = _media_request({"action": "status", "job_id": job_id})["job"]
-        if status["state"] not in {"bereit", "fehler"} or filename not in {item["filename"] for item in status["files"]}:
+        if status["state"] not in {"bereit", "fehler", "abgebrochen"} or filename not in {item["filename"] for item in status["files"]}:
             raise ValueError("USB-Image ist noch nicht bereit oder wurde nicht vollständig verifiziert.")
         metadata, chunks = _media_download(job_id, filename)
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:

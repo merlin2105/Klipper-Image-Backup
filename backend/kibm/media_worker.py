@@ -9,6 +9,7 @@ import os
 import pwd
 import re
 import secrets
+import signal
 import socket
 import socketserver
 import stat
@@ -27,7 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
 try:
-    from . import nas, partitions
+    from . import nas, partitions, printer_status
 except ImportError:  # started as a script by systemd: load the sibling modules explicitly
     import importlib.util
 
@@ -41,6 +42,7 @@ except ImportError:  # started as a script by systemd: load the sibling modules 
 
     partitions = _sibling("partitions")
     nas = _sibling("nas")
+    printer_status = _sibling("printer_status")
 
 RUN_DIR = Path("/run/kibm-media")
 SOCKET_PATH = Path("/run/kibm-media/worker.sock")
@@ -58,6 +60,8 @@ UPDATE_COMMIT_PATH = Path("/run/kibm-media/update-commit")
 SOURCE_DEVICE = "/dev/mmcblk0"
 PISHRINK_PATH = Path("/opt/klipper-image-backup-manager/tools/pishrink.sh")
 BLOCKGETSIZE64 = 0x80081272
+# Backup progress on the printer (Klipper status line, KlipperScreen banner).
+PRINTER_STATUS = printer_status.Notifier(printer_status.moonraker_send, printer_status.moonraker_has_respond)
 FIFREEZE = 0xC0045877
 FITHAW = 0xC0045878
 CHUNK_BYTES = 4 * 1024 * 1024
@@ -93,6 +97,11 @@ class MediaJob:
     files: list[dict[str, Any]] = field(default_factory=list)
     active_downloads: int = 0
     target: str = "usb"
+    cancel_requested: bool = False
+
+
+class JobCancelled(Exception):
+    """The user cancelled the running job."""
 
 
 _lock = threading.RLock()
@@ -114,6 +123,71 @@ _nas_lock = threading.Lock()
 
 def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=timeout)
+
+
+def _check_cancel() -> None:
+    with _lock:
+        if _job and _job.cancel_requested:
+            raise JobCancelled()
+
+
+def _progress(**values: Any) -> None:
+    """Report progress of the running job; stops it here if the user cancelled."""
+    _check_cancel()
+    _set_job(**values)
+
+
+def _run_cancellable(
+    args: list[str], timeout: int, check: bool = False, poll_seconds: float = 1,
+) -> subprocess.CompletedProcess[str]:
+    """Like _run for long tools (e2fsck, PiShrink) that a cancel must be able to stop.
+
+    The tool runs in its own process group, so its helpers (e2fsck, resize2fs inside
+    PiShrink) stop with it.
+    """
+    process = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+    )
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                stdout, stderr = process.communicate(timeout=poll_seconds)
+                break
+            except subprocess.TimeoutExpired:
+                _check_cancel()
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(args, timeout) from None
+    except BaseException:
+        _stop_group(process)
+        raise
+    if check and process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, args, stdout, stderr)
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+
+
+def _stop_group(process: subprocess.Popen[str]) -> None:
+    # SIGTERM first so PiShrink can run its cleanup trap; SIGKILL if it hangs.
+    for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, None)):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            process.communicate(timeout=wait)
+            break
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _detach_loops(path: Path) -> None:
+    """Detach loop devices a stopped tool left on `path`, so its space is freed."""
+    try:
+        listing = _run(["losetup", "--noheadings", "--output", "NAME", "--associated", str(path)]).stdout
+        for loop in listing.split():
+            _run(["losetup", "--detach", loop])
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Could not detach loop devices of %s: %s", path, exc)
 
 
 def _ensure_update_idle() -> None:
@@ -187,9 +261,7 @@ def _repair_image(path: Path) -> bool:
             "losetup", "--find", "--show", "--offset", str(offset), "--sizelimit", str(length), "--", str(path),
         ]).stdout.strip()
         try:
-            result = subprocess.run(
-                ["e2fsck", "-fy", loop], capture_output=True, text=True, timeout=E2FSCK_TIMEOUT_SECONDS,
-            )
+            result = _run_cancellable(["e2fsck", "-fy", loop], timeout=E2FSCK_TIMEOUT_SECONDS)
         finally:
             _run(["losetup", "--detach", loop])
         if result.returncode >= 4:
@@ -487,6 +559,8 @@ def _set_job(**values: Any) -> None:
         if _job:
             for key, value in values.items():
                 setattr(_job, key, value)
+            # Never blocks: a background thread sends it to Moonraker.
+            PRINTER_STATUS.update(_job_data(_job))
 
 
 def _copy_for_shrink(source: Path, target: Path) -> None:
@@ -495,31 +569,35 @@ def _copy_for_shrink(source: Path, target: Path) -> None:
         while chunk := reader.read(CHUNK_BYTES):
             writer.write(chunk)
             copied += len(chunk)
-            _set_job(shrink_bytes=copied)
+            _progress(shrink_bytes=copied)
 
 
 def _shrink_image(job: MediaJob, full_path: Path, final_path: Path) -> dict[str, Any]:
     working_path = full_path.parent / f".{job.job_id}.img.part"
-    _set_job(
+    _progress(
         state="schrumpfen", phase="kopie", shrink_total_bytes=job.image_size,
         message="Arbeitskopie für PiShrink wird erstellt.",
     )
     try:
         _copy_for_shrink(full_path, working_path)
-        _set_job(phase="verkleinern", message="PiShrink prüft und verkleinert Dateisystem und Partition.")
+        _progress(phase="verkleinern", message="PiShrink prüft und verkleinert Dateisystem und Partition.")
         # PiShrink leaves only a few MB free, less than ext4 reserves for root, so the
         # restored card must grow its root partition on first boot (PiShrink autoexpand).
-        result = _run([str(PISHRINK_PATH), "-n", str(working_path)], timeout=60 * 60 * 4)
+        try:
+            result = _run_cancellable([str(PISHRINK_PATH), "-n", str(working_path)], timeout=60 * 60 * 4, check=True)
+        except JobCancelled:
+            _detach_loops(working_path)
+            raise
         if "autoexpand will not be enabled" in result.stdout or "does not yet support autoexpanding" in result.stdout:
             raise OSError("PiShrink konnte die automatische Vergrößerung beim ersten Start nicht einrichten.")
         final_size = working_path.stat().st_size
         if not 0 < final_size < job.image_size:
             raise OSError("PiShrink hat kein kleineres, gültiges Image erzeugt.")
-        _set_job(
+        _progress(
             phase="pruefsumme", shrink_bytes=0, shrink_total_bytes=final_size,
             message="Prüfsumme des verkleinerten Images wird berechnet.",
         )
-        final_hash = _hash_file(working_path, lambda count: _set_job(shrink_bytes=count))
+        final_hash = _hash_file(working_path, lambda count: _progress(shrink_bytes=count))
         with working_path.open("rb") as image:
             os.fsync(image.fileno())
         working_path.rename(final_path)
@@ -573,7 +651,7 @@ def _run_existing_nas_shrink(job: MediaJob, image: dict[str, Any]) -> None:
         with _lock:
             finished = job.state == "bereit"
         if not finished:
-            _set_job(state="fehler", phase="fehler", message="NAS-Image konnte nicht verkleinert werden.", error=str(exc))
+            _end_failed(exc, "NAS-Image konnte nicht verkleinert werden.", SHRINK_CANCELLED)
 
 
 def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
@@ -595,8 +673,8 @@ def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
             raise ValueError("Der USB-Stick wurde beim Einbinden gewechselt.")
         result = _shrink_listed_image(job, image, VOLUME_PATH)
         _set_job(state="bereit", phase="fertig", message="Verkleinerte Kopie ist auf USB gespeichert.", files=[result])
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        _set_job(state="fehler", phase="fehler", message="USB-Image konnte nicht verkleinert werden.", error=str(exc))
+    except (OSError, ValueError, subprocess.SubprocessError, JobCancelled) as exc:
+        _end_failed(exc, "USB-Image konnte nicht verkleinert werden.", SHRINK_CANCELLED)
 
 
 TARGET_TEXT = {
@@ -617,8 +695,19 @@ TARGET_TEXT = {
 }
 
 
+BACKUP_CANCELLED = "Sicherung wurde abgebrochen. Unvollständige Dateien wurden gelöscht."
+SHRINK_CANCELLED = "Verkleinern wurde abgebrochen. Die Arbeitskopie wurde gelöscht, das Original ist unverändert."
+
+
+def _end_failed(exc: BaseException, failed: str, cancelled: str, files: Optional[list[dict[str, Any]]] = None) -> None:
+    if isinstance(exc, JobCancelled):
+        _set_job(state="abgebrochen", phase="abgebrochen", message=cancelled, error=None, files=files or [])
+    else:
+        _set_job(state="fehler", phase="fehler", message=failed, error=str(exc), files=files or [])
+
+
 def _fail_job(job: MediaJob, exc: BaseException) -> None:
-    _set_job(state="fehler", phase="fehler", message=TARGET_TEXT[job.target]["failed"], error=str(exc), files=[])
+    _end_failed(exc, TARGET_TEXT[job.target]["failed"], BACKUP_CANCELLED)
 
 
 def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
@@ -641,6 +730,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
             raise ValueError("Nach dem Formatieren steht nicht genug freier Platz für den sicheren Image-Ablauf zur Verfügung.")
         if _printer_active():
             raise ValueError("Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.")
+        _check_cancel()
     except Exception as exc:
         _fail_job(job, exc)
         return
@@ -661,12 +751,13 @@ def _run_nas_job(job: MediaJob, config: Any, hostname: str) -> None:
                 raise ValueError("Die Größe der System-microSD hat sich geändert.")
             if _printer_active():
                 raise ValueError("Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.")
+            _check_cancel()
             _capture_image(job, directory, hostname)
     except Exception as exc:
         # _capture_image reports its own result; only failures around it (mounting,
         # folder, space, unmounting before the image was finished) end up here.
         with _lock:
-            finished = job.state in {"bereit", "fehler"}
+            finished = job.state in {"bereit", "fehler", "abgebrochen"}
         if finished:
             logger.warning("NAS job %s: %s", job.job_id, exc)
         else:
@@ -703,6 +794,7 @@ def _capture_image(job: MediaJob, directory: Path, hostname: str) -> None:
             with part_path.open("xb", buffering=0) as output:
                 copied = 0
                 while copied < job.image_size:
+                    _check_cancel()
                     if time.monotonic() >= next_printer_check:
                         if _printer_active():
                             raise OSError("Moonraker meldet einen aktiven Druck. Image-Datei ist unvollständig.")
@@ -719,18 +811,18 @@ def _capture_image(job: MediaJob, directory: Path, hostname: str) -> None:
         finally:
             os.close(source_fd)
         if job.verify_image:
-            _set_job(state="verifizieren", phase="verifizieren", message=text["verifying"])
-            if _hash_file(part_path, lambda count: _set_job(verified_bytes=count)) != digest.hexdigest():
+            _progress(state="verifizieren", phase="verifizieren", message=text["verifying"])
+            if _hash_file(part_path, lambda count: _progress(verified_bytes=count)) != digest.hexdigest():
                 raise OSError(text["verify_failed"])
 
-        _set_job(
+        _progress(
             state="reparieren", phase="dateisystem", verified_bytes=0,
             message="Journal wird abgeschlossen und das Dateisystem im Image geprüft und repariert.",
         )
         final_hash = digest.hexdigest()
         if _repair_image(part_path):
-            _set_job(phase="pruefsumme", message="Prüfsumme des reparierten Images wird berechnet.")
-            final_hash = _hash_file(part_path, lambda count: _set_job(verified_bytes=count))
+            _progress(phase="pruefsumme", message="Prüfsumme des reparierten Images wird berechnet.")
+            final_hash = _hash_file(part_path, lambda count: _progress(verified_bytes=count))
         with part_path.open("rb") as image:
             os.fsync(image.fileno())
         part_path.rename(full_path)
@@ -760,7 +852,8 @@ def _capture_image(job: MediaJob, directory: Path, hostname: str) -> None:
                 "filename": full_path.name, "size_bytes": full_path.stat().st_size,
                 "sha256": job.sha256, "kind": "vollständig",
             })
-        _set_job(state="fehler", phase="fehler", message=text["failed"], error=str(exc), files=files)
+        cancelled = "Sicherung wurde abgebrochen. Das vollständige Image ist erhalten." if files else BACKUP_CANCELLED
+        _end_failed(exc, text["failed"], cancelled, files)
 
 
 def _job_data(job: MediaJob) -> dict[str, Any]:
@@ -770,7 +863,7 @@ def _job_data(job: MediaJob) -> dict[str, Any]:
         "shrink_bytes": job.shrink_bytes, "shrink_total_bytes": job.shrink_total_bytes,
         "sha256": job.sha256, "error": job.error, "files": job.files,
         "shrink": job.shrink, "keep_full": job.keep_full, "verify_image": job.verify_image,
-        "target": job.target,
+        "target": job.target, "cancel_requested": job.cancel_requested,
     }
 
 
@@ -976,6 +1069,8 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._delete_image(request)
             elif action == "status":
                 self._status(request)
+            elif action == "cancel":
+                self._cancel(request)
             elif action == "current":
                 with _lock:
                     self._reply({"job": _job_data(_job) if _job else None})
@@ -1213,6 +1308,16 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 raise ValueError("USB-Auftrag nicht gefunden.")
             self._reply({"job": _job_data(job)})
 
+    def _cancel(self, request: dict[str, Any]) -> None:
+        with _lock:
+            job = _job
+            if not job or job.job_id != request.get("job_id"):
+                raise ValueError("Auftrag nicht gefunden.")
+            if job.state not in BUSY_STATES:
+                raise ValueError("Der Auftrag läuft nicht mehr.")
+            job.cancel_requested = True
+            self._reply({"job": _job_data(job)})
+
     def _download(self, request: dict[str, Any]) -> None:
         _ensure_update_idle()
         name = request.get("filename")
@@ -1223,7 +1328,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
             file_info = next((item for item in job.files if item["filename"] == name), None) if job else None
             if job and job.target == "nas":
                 raise ValueError("NAS-Images liegen bereits auf dem NAS.")
-            if not job or job.state not in {"bereit", "fehler"} or not file_info:
+            if not job or job.state not in {"bereit", "fehler", "abgebrochen"} or not file_info:
                 raise ValueError("Image-Download ist nicht bereit.")
             if job.active_downloads:
                 raise ValueError("Ein USB-Image wird bereits zum PC übertragen.")

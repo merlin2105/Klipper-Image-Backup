@@ -132,6 +132,19 @@ When KIBM finds `.img` files on a detected USB drive or in the NAS backup folder
 - **Already compact or not safe to inspect:** KIBM will not offer another shrink.
 - **Delete:** Removes only the selected `.img` file. A custom confirmation dialog and, when needed, Pi account sign-in are required. Deletion cannot be undone.
 
+### Cancelling a backup
+
+A running USB or NAS backup and the shrinking of an image can be stopped with **Cancel job** below the progress bar. KIBM stops in every phase, including while e2fsck or PiShrink run, and deletes the incomplete image file or working copy. Older backups stay untouched. If you cancel while the image is being shrunk, the finished and verified full image is kept.
+
+### Progress on the printer
+
+During a USB or NAS backup and while shrinking, KIBM also reports progress to Klipper (the text is German), for example `KIBM: 35 % gesichert (10,6 von 29,8 GB)`:
+
+- **Printer display and Mainsail/Fluidd:** status line via `SET_DISPLAY_TEXT`, updated at most every 10 seconds and cleared one minute after the job ends.
+- **KlipperScreen:** a short banner at every step and every 10 %. This needs `[respond]` in the Klipper configuration; without it KIBM sends only the status line. These messages also appear in the Mainsail/Fluidd console.
+
+If Moonraker cannot be reached, the backup continues normally without the printer display. Saving to the PC through the browser shows nothing on the printer.
+
 ### GitHub updates
 
 The dashboard checks GitHub for a newer KIBM version and displays the installed and available version numbers. Use **Check for updates** to run the check manually. An available update is installed only after you confirm it.

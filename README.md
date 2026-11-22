@@ -132,6 +132,19 @@ Wenn KIBM auf einem erkannten USB-Datenträger oder im NAS-Sicherungsordner `.im
 - **Bereits kompakt oder nicht sicher prüfbar:** KIBM bietet keinen weiteren Shrink an.
 - **Löschen:** Entfernt ausschließlich die ausgewählte `.img`-Datei. Ein eigenes Bestätigungsfenster und gegebenenfalls die Pi-Konto-Anmeldung sind erforderlich. Das Löschen kann nicht rückgängig gemacht werden.
 
+### Sicherung abbrechen
+
+Eine laufende Sicherung auf USB oder NAS und das Verkleinern eines Images lassen sich unter dem Fortschrittsbalken mit **Vorgang abbrechen** beenden. KIBM stoppt in jeder Phase, auch während e2fsck oder PiShrink laufen, und löscht die unvollständige Image-Datei oder Arbeitskopie. Ältere Sicherungen bleiben unverändert. Wird während des Verkleinerns abgebrochen, bleibt das bereits fertige und geprüfte vollständige Image erhalten.
+
+### Fortschritt am Drucker
+
+Während einer Sicherung auf USB oder NAS und beim Verkleinern meldet KIBM den Fortschritt auch an Klipper, zum Beispiel `KIBM: 35 % gesichert (10,6 von 29,8 GB)`:
+
+- **Drucker-Display und Mainsail/Fluidd:** Statuszeile über `SET_DISPLAY_TEXT`, höchstens alle 10 Sekunden aktualisiert. Eine Minute nach dem Ende wird sie wieder geleert.
+- **KlipperScreen:** kurze Einblendung bei jedem Schritt und alle 10 %. Dafür muss `[respond]` in der Klipper-Konfiguration aktiv sein; fehlt es, schickt KIBM nur die Statuszeile. Diese Meldungen erscheinen auch in der Konsole von Mainsail/Fluidd.
+
+Ist Moonraker nicht erreichbar, läuft die Sicherung ohne Anzeige am Drucker normal weiter. Beim Speichern auf dem PC über den Browser gibt es keine Anzeige am Drucker.
+
 ### GitHub-Update
 
 Das Dashboard prüft GitHub auf eine neuere KIBM-Version und zeigt installierte sowie verfügbare Versionsnummer an. Mit **Auf Update prüfen** kannst du die Prüfung manuell starten. Ein verfügbares Update wird erst nach deiner Bestätigung installiert.
