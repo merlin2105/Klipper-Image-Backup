@@ -26,6 +26,7 @@ KIBM creates full images of a Klipper system microSD card and displays key Raspb
 - A regular Linux account with `sudo` privileges. Run the installer with `sudo` from that account.
 - Internet access during installation so the installer can download required packages and Python dependencies. The web updater also needs outbound HTTPS access to GitHub.
 - For a USB backup: a USB drive connected directly to the Pi, with enough free space.
+- For a NAS backup: an SMB share (Synology, TrueNAS, Windows and others) with a user who may write there; ideally the Pi is connected by cable.
 
 KIBM does not replace or reinstall Fluidd, Mainsail, Klipper, or Moonraker. KIBM queries Moonraker locally when checking print status.
 
@@ -87,16 +88,41 @@ After completion, you can download the image through your browser. Then use **Sa
 
 ### 3. Back up a full image to a NAS (SMB)
 
-For printers whose built-in Pi has no reachable USB port, KIBM can write the image directly to a folder on a Windows or NAS share (SMB, e.g. Synology, TrueNAS).
+On many printers the Raspberry Pi and its display are built into the case, and a USB drive is hard to connect. For these setups KIBM writes the image directly to a folder on a network share: Synology, TrueNAS, QNAP, a Windows share or another SMB server (SMB 2 or newer).
 
-1. Choose **NAS (SMB) · Backup** and sign in with the Pi account.
-2. **Search network for NAS** lists devices to click, or enter the IP address or name manually. A pasted address such as `\\192.168.1.100\Backup` is split automatically.
-3. Enter user and password. **Show shares** lists the NAS shares. The share name must match exactly, including upper/lower case.
-4. **Connect**, choose or create the backup folder, **Use this folder**.
+#### What you need
 
-Afterwards, selecting the NAS card checks the connection and shows **✓ Connection OK** with free space, or a red reason. The options (PiShrink, keep full image, verify) and the process (journal flush, copy, verify, `e2fsck`, shrink) match the USB backup; nothing is formatted on the NAS. **Change credentials** and **Remove connection** sit below the status line; an empty password field keeps the saved password only while NAS, share and user stay the same.
+- A share on the NAS, for example `Backup`, and a NAS user with **write access** to it. Guest access is not supported.
+- Enough free space: at least the card image size, about twice that with PiShrink, because shrinking needs a working copy. The size is shown in the dashboard under **System microSD image**.
+- Ideally a **network cable** between the Pi and your network. In testing a Pi 4 wrote 78 MB/s to the NAS over cable and only 4.6 MB/s over Wi-Fi. A 15 GB image takes a few minutes over cable and almost an hour over Wi-Fi.
 
-KIBM mounts the share only while an action runs, inside the sandboxed media service, and never changes `/etc/fstab`, so a switched-off NAS never delays booting. Connect the Pi by network cable for NAS backups if possible: in testing a Pi 4 wrote 78 MB/s to the NAS over cable and only 4.6 MB/s over Wi-Fi.
+#### One-time setup
+
+1. Choose **NAS (SMB) · Backup** and sign in with your Pi account.
+2. **Search network for NAS** lists devices to click. Or enter the IP address (e.g. `192.168.1.100`) or name of the NAS manually. A pasted address such as `\\192.168.1.100\Backup`, `//192.168.1.100/Backup` or `smb://192.168.1.100/Backup` is split into NAS and share automatically.
+3. Enter **user** and **password** of the NAS account. For a domain account, write `DOMAIN\user` in the user field.
+4. **Show shares** lists the NAS shares to click. If that does not work, type the **share name** yourself (see [troubleshooting](#nas-shares-are-not-listed)). The name must match exactly, including upper/lower case: `Backup` is not `backup`.
+5. **Connect**: KIBM mounts the share briefly and shows its folders. You do not type the folder; you click your way to it. The path line takes you back, **New folder** creates one.
+6. **Use this folder** checks that KIBM can write there and saves the connection.
+
+#### Backing up
+
+Selecting the NAS card checks the connection live and shows **✓ Connection OK · //NAS/share/folder** with the free space, or a red ✗ with the reason. The options and **Create image** only appear once the tick is green.
+
+Options and process match the USB backup: flush the root journal, read the card, optionally verify with SHA-256, repair the filesystem in the image with `e2fsck`, optionally shrink with PiShrink. Nothing is formatted on the NAS. File names match USB, for example `PRUSA-20261122-101500-sdkarte.img`, with shrinking `…-sdkarte-geshrinkt.img` and, if kept, `…-sdkarte-voll.img`.
+
+**The folder looks empty during the backup.** KIBM first writes a hidden file `.…-sdkarte.img.part` and renames it to `….img` only after verification and repair, so an aborted run never leaves a half-written file that looks like a valid image. Samba servers such as TrueNAS hide files starting with a dot by default. In Windows Explorer use *View → Show → Hidden items*, in Linux file managers press `Ctrl+H`.
+
+#### Changing and removing
+
+Below the status line are **Change credentials** and **Remove connection**. If you leave the password field empty when changing, KIBM keeps the saved password, but only while NAS, share and user stay the same. A different NAS needs the password again. **Remove connection** only deletes the saved credentials on the Pi; images on the NAS are kept.
+
+#### How KIBM treats the NAS
+
+- The share is mounted only for one action (check, list folders, back up, list images, delete, shrink) and unmounted afterwards. KIBM never changes `/etc/fstab`, so a switched-off NAS never delays booting.
+- The password is stored only in `/var/lib/kibm-media/nas-credentials`, readable by root only. It never appears in process lists, logs or browser responses.
+- On the NAS, KIBM deletes only the image file you explicitly selected, or its own hidden `.part` file after an abort.
+- KIBM lists existing NAS images only when the page loads (signed in), after a NAS backup or via **Reload NAS images**, never in the background, so the NAS can sleep.
 
 ### 4. Inspect, shrink, or delete an existing image
 
@@ -165,6 +191,32 @@ sudo kibm-admin update
 - `sudo kibm-admin usb` lists drives detected by the media worker.
 - Use a drive with enough space: a regular USB image workflow needs at least the card image size plus overhead. Shrinking requires room for two full image copies plus overhead while it runs.
 - Back up existing data elsewhere before starting a USB backup. KIBM formats the selected drive before writing.
+
+### NAS shares are not listed
+
+**Show shares** asks the NAS for its shares using the `smbclient` program. That can fail for several reasons. The backup itself never needs the list: type the share name yourself and click **Connect**.
+
+- **Message “The share list is not available on this system (smbclient is missing)”:** `smbclient` is not installed. The installer sets it up but treats it as optional, so an update never fails because of it. The most common reason is an operating system that is out of support, for example Debian 11 (bullseye, the base of older MainsailOS releases). The Debian security server then no longer serves the newest Samba build (`404 Not Found`) while the package list still points to it. From KIBM 0.2.10b10 the installer then tries the matching build from the regular Debian archive. To do it by hand:
+
+  ```bash
+  sudo apt-get update
+  sudo apt-get install -t bullseye smbclient
+  ```
+
+  Replace `bullseye` with your Debian release name (`grep VERSION_CODENAME /etc/os-release`). Then click **Show shares** again; KIBM does not need a restart.
+- **“Sign-in rejected”:** user or password is wrong, or the account may not sign in over SMB. On TrueNAS the user needs *Samba Authentication* enabled; if the user was created before the SMB service, setting the password once more often helps. Some NAS models refuse the share list to accounts without admin rights, while mounting a known share still works.
+- **The share you want is missing from the list:** shares marked as not browsable on the NAS (TrueNAS *Browsable to Network Clients* off, on Synology the option to hide the folder from network browsing) and hidden shares ending in `$` are not shown. Entered manually with the correct name, they work normally.
+- **“NAS not reachable” or timeout:** check the IP address, that the NAS is on and in the same network. A firewall must allow TCP port 445 from the Pi.
+
+### NAS backup: other problems
+
+- **“Sign-in rejected” when connecting:** first check the exact spelling of the share name, including upper/lower case. Then user, password and the user's rights on the share (on TrueNAS the dataset ACL).
+- **“Share not found”:** no share with this exact name exists; usually a typo or wrong upper/lower case.
+- **“The NAS name could not be resolved”:** enter the IP address instead of the name, ideally after giving the NAS a fixed address in your router.
+- **“No write permission in the backup folder”:** the NAS user may not write there. Adjust the rights on the NAS or choose another folder.
+- **Search network for NAS finds nothing:** the search uses mDNS/Bonjour (only when `avahi-utils` is installed) and checks which devices in the Pi's own /24 network accept TCP port 445. A NAS in another network or behind a firewall is not found; enter its IP address manually.
+- **The backup is very slow:** check whether the Pi uses Wi-Fi instead of cable (`ip -br addr` shows whether `eth0` has an address). With an active cable connection the Pi prefers it automatically.
+- **The folder is empty during the backup:** expected, see above. The hidden `.part` file becomes the `.img` file at the end.
 
 ### Support and logs
 

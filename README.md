@@ -26,6 +26,7 @@ KIBM erstellt vollständige Images einer Klipper-System-microSD und zeigt wichti
 - Ein normales Linux-Benutzerkonto mit `sudo`-Rechten. Die Installation muss mit `sudo` aus diesem Benutzerkonto aufgerufen werden.
 - Internetzugriff während der Installation, damit benötigte Pakete und Python-Abhängigkeiten geladen werden können. Für den Web-Updater wird ausgehendes HTTPS zu GitHub benötigt.
 - Für eine USB-Sicherung: ein direkt am Pi angeschlossener USB-Datenträger mit ausreichend freiem Speicher.
+- Für eine NAS-Sicherung: eine SMB-Freigabe (Synology, TrueNAS, Windows u. a.) mit einem Benutzer, der dort schreiben darf; am besten ist der Pi per Kabel verbunden.
 
 Fluidd, Mainsail, Klipper und Moonraker werden durch KIBM weder ersetzt noch neu installiert. KIBM verwendet Moonraker lokal, wenn es den Druckstatus prüft.
 
@@ -87,16 +88,41 @@ Nach Abschluss kann die Datei über den Browser heruntergeladen werden. Nutze an
 
 ### 3. Vollständiges Image auf einem NAS sichern (SMB)
 
-Für Drucker, an deren eingebautem Pi kein USB-Stick erreichbar ist, kann KIBM das Image direkt in einen Ordner auf einer Windows- oder NAS-Freigabe (SMB, z. B. Synology, TrueNAS) schreiben.
+Bei vielen Druckern ist der Raspberry Pi samt Display fest im Gehäuse verbaut, und ein USB-Stick lässt sich kaum anschließen. Für diese Fälle schreibt KIBM das Image direkt in einen Ordner auf einer Netzwerkfreigabe: Synology, TrueNAS, QNAP, eine Windows-Freigabe oder ein anderer SMB-Server (SMB 2 oder neuer).
 
-1. Wähle **NAS (SMB) · Sicherung** und melde dich mit dem Pi-Konto an.
-2. **NAS im Netzwerk suchen** listet gefundene Geräte zum Anklicken, alternativ IP-Adresse oder Name von Hand eintragen. Eine kopierte Adresse wie `\\192.168.1.100\Backup` wird automatisch aufgeteilt.
-3. Benutzer und Passwort eingeben. **Freigaben anzeigen** listet die Freigaben des NAS. Der Freigabename muss exakt stimmen, auch in Groß-/Kleinschreibung.
-4. **Verbinden**, Sicherungsordner wählen oder anlegen, **Diesen Ordner verwenden**.
+#### Was du vorher brauchst
 
-Danach prüft KIBM beim Anklicken der NAS-Karte die Verbindung und zeigt **✓ Verbindung OK** mit freiem Platz oder einen roten Grund. Die Optionen (PiShrink, Voll-Image behalten, Prüfen) und der Ablauf (Journal abschließen, Kopie, Prüfen, `e2fsck`, Shrink) entsprechen der USB-Sicherung; auf dem NAS wird nichts formatiert. **Zugangsdaten ändern** und **Verbindung entfernen** stehen unter der Statuszeile; ein leeres Passwortfeld behält das gespeicherte Passwort nur, solange NAS, Freigabe und Benutzer gleich bleiben.
+- Eine Freigabe auf dem NAS, zum Beispiel `Backup`, und einen NAS-Benutzer mit **Schreibrechten** auf diese Freigabe. Gastzugang wird nicht unterstützt.
+- Genug freien Platz: mindestens die Größe des Karten-Images, mit PiShrink etwa das Doppelte, weil während des Verkleinerns eine Arbeitskopie entsteht. Die Größe steht im Dashboard unter **Image der System-microSD**.
+- Am besten eine **Kabelverbindung** zwischen Pi und Netzwerk. Im Test schrieb ein Pi 4 über Kabel 78 MB/s auf das NAS, über WLAN nur 4,6 MB/s. Ein 15-GB-Image dauert über Kabel wenige Minuten, über WLAN fast eine Stunde.
 
-KIBM bindet die Freigabe nur für die Dauer einer Aktion im abgeschotteten Medien-Dienst ein und ändert `/etc/fstab` nicht; ein ausgeschaltetes NAS verzögert also keinen Systemstart. Verbinde den Pi für NAS-Sicherungen möglichst per Netzwerkkabel: Im Test schrieb ein Pi 4 über Kabel 78 MB/s auf das NAS, über WLAN nur 4,6 MB/s.
+#### Einmalig einrichten
+
+1. Wähle **NAS (SMB) · Sicherung** und melde dich mit deinem Pi-Konto an.
+2. **NAS im Netzwerk suchen** zeigt gefundene Geräte zum Anklicken. Alternativ trägst du die IP-Adresse (z. B. `192.168.1.100`) oder den Namen des NAS von Hand ein. Eine kopierte Adresse wie `\\192.168.1.100\Backup`, `//192.168.1.100/Backup` oder `smb://192.168.1.100/Backup` wird automatisch in NAS und Freigabe aufgeteilt.
+3. Gib **Benutzer** und **Passwort** des NAS-Kontos ein. Für ein Domänenkonto schreibst du `DOMÄNE\benutzer` ins Benutzerfeld.
+4. **Freigaben anzeigen** listet die Freigaben des NAS zum Anklicken. Funktioniert das nicht, trägst du den **Freigabenamen** von Hand ein (siehe [Fehlerbehebung](#nas-freigaben-werden-nicht-aufgelistet)). Der Name muss exakt stimmen, auch in Groß- und Kleinschreibung: `Backup` ist nicht `backup`.
+5. **Verbinden**: KIBM hängt die Freigabe kurz ein und zeigt die Ordner darauf. Den Ordner tippst du nicht ein, du klickst dich hin. Über die Pfadzeile kommst du zurück, mit **Neuer Ordner** legst du einen Ordner an.
+6. **Diesen Ordner verwenden** prüft, ob KIBM dort schreiben darf, und speichert die Verbindung.
+
+#### Sichern
+
+Beim Anklicken der NAS-Karte prüft KIBM die Verbindung live und zeigt **✓ Verbindung OK · //NAS/Freigabe/Ordner** mit dem freien Platz, oder ein rotes ✗ mit dem Grund. Erst bei grünem Haken erscheinen die Optionen und **Image erstellen**.
+
+Die Optionen und der Ablauf entsprechen der USB-Sicherung: Root-Journal abschließen, Karte lesen, optional mit SHA-256 prüfen, Dateisystem im Image mit `e2fsck` reparieren, optional mit PiShrink verkleinern. Auf dem NAS wird nichts formatiert. Die Dateien heißen wie bei USB, zum Beispiel `PRUSA-20261122-101500-sdkarte.img`, mit Shrink `…-sdkarte-geshrinkt.img` und, falls behalten, `…-sdkarte-voll.img`.
+
+**Während der Sicherung wirkt der Ordner leer.** KIBM schreibt zuerst in eine versteckte Datei `.…-sdkarte.img.part` und benennt sie erst nach Prüfung und Reparatur in `….img` um. So bleibt nach einem Abbruch keine halbfertige Datei liegen, die wie ein gültiges Image aussieht. Dateien mit einem Punkt am Anfang blenden Samba-Server wie TrueNAS standardmäßig aus. Im Windows-Explorer siehst du sie unter *Ansicht → Einblenden → Ausgeblendete Elemente*, in Linux-Dateimanagern mit `Strg+H`.
+
+#### Ändern und entfernen
+
+Unter der Statuszeile stehen **Zugangsdaten ändern** und **Verbindung entfernen**. Lässt du beim Ändern das Passwortfeld leer, behält KIBM das gespeicherte Passwort, aber nur solange NAS, Freigabe und Benutzer gleich bleiben. Für ein anderes NAS musst du das Passwort neu eingeben. **Verbindung entfernen** löscht nur die gespeicherten Zugangsdaten auf dem Pi; die Images auf dem NAS bleiben erhalten.
+
+#### So geht KIBM mit dem NAS um
+
+- Die Freigabe wird nur für die Dauer einer Aktion eingebunden (Prüfen, Ordner auflisten, Sichern, Images auflisten, Löschen, Verkleinern) und danach wieder ausgehängt. KIBM ändert `/etc/fstab` nicht. Ein ausgeschaltetes NAS verzögert also keinen Systemstart.
+- Das Passwort liegt nur in `/var/lib/kibm-media/nas-credentials`, und diese Datei kann nur root lesen. Es erscheint nicht in Prozesslisten, Logs oder Antworten an den Browser.
+- Auf dem NAS löscht KIBM nur die Image-Datei, die du ausdrücklich ausgewählt hast, oder seine eigene versteckte `.part`-Datei nach einem Abbruch.
+- Die Liste vorhandener NAS-Images fragt KIBM nur beim Laden der Seite (angemeldet), nach einer NAS-Sicherung oder über **NAS-Images neu laden** ab, nie im Hintergrund. So kann das NAS schlafen.
 
 ### 4. Ein vorhandenes Image prüfen, verkleinern oder löschen
 
@@ -165,6 +191,32 @@ sudo kibm-admin update
 - `sudo kibm-admin usb` zeigt die vom Medien-Worker erkannten Geräte.
 - Verwende einen Datenträger mit genügend Platz: Für einen normalen USB-Image-Ablauf wird mindestens die Größe des Karten-Images plus Reserve benötigt. Mit Shrink müssen während der Verarbeitung zwei vollständige Image-Kopien plus Reserve Platz finden.
 - Sichere vorhandene Daten vor einer USB-Sicherung an einem anderen Ort. KIBM formatiert den ausgewählten Stick vor dem Schreiben.
+
+### NAS-Freigaben werden nicht aufgelistet
+
+**Freigaben anzeigen** fragt das NAS mit dem Programm `smbclient` nach seinen Freigaben. Das kann aus mehreren Gründen nicht klappen. Die Sicherung selbst braucht die Liste nie: Trag den Freigabenamen von Hand ein und klicke **Verbinden**.
+
+- **Meldung „Die Freigabenliste ist auf diesem System nicht verfügbar (smbclient fehlt)“:** `smbclient` ist nicht installiert. Der Installer richtet es mit ein, behandelt es aber als optional, damit ein Update nicht daran scheitert. Häufigster Grund ist ein Betriebssystem, dessen Support ausgelaufen ist, zum Beispiel Debian 11 (bullseye, Grundlage älterer MainsailOS-Versionen). Der Debian-Sicherheitsserver bietet dann die neueste Samba-Version nicht mehr an (Fehler `404 Not Found`), während die Paketliste noch auf sie verweist. Ab KIBM 0.2.10b10 versucht der Installer in diesem Fall die passende Version aus dem normalen Debian-Archiv. Von Hand geht das so:
+
+  ```bash
+  sudo apt-get update
+  sudo apt-get install -t bullseye smbclient
+  ```
+
+  `bullseye` ersetzt du durch den Namen deiner Debian-Version (`grep VERSION_CODENAME /etc/os-release`). Danach **Freigaben anzeigen** erneut klicken; ein Neustart von KIBM ist nicht nötig.
+- **„Anmeldung abgelehnt“:** Benutzer oder Passwort stimmen nicht, oder das Konto darf sich per SMB nicht anmelden. Bei TrueNAS muss beim Benutzer *Samba Authentication* aktiv sein; wurde der Benutzer vor dem SMB-Dienst angelegt, hilft es oft, das Passwort einmal neu zu setzen. Manche NAS verweigern die Freigabenliste für Konten ohne Administratorrechte. Das Einhängen einer bekannten Freigabe klappt dann trotzdem.
+- **Die gewünschte Freigabe fehlt in der Liste:** Freigaben, die im NAS als nicht sichtbar markiert sind (TrueNAS *Browsable to Network Clients* aus, bei Synology die Option zum Verbergen in der Netzwerkumgebung), und versteckte Freigaben mit `$` am Ende zeigt KIBM nicht an. Mit dem richtigen Namen von Hand eingetragen funktionieren sie normal.
+- **„NAS nicht erreichbar“ oder Zeitüberschreitung:** IP-Adresse prüfen, NAS eingeschaltet und im selben Netz? Eine Firewall muss TCP-Port 445 vom Pi zulassen.
+
+### NAS-Sicherung: weitere Probleme
+
+- **„Anmeldung abgelehnt“ beim Verbinden:** zuerst die genaue Schreibweise des Freigabenamens prüfen, auch Groß- und Kleinschreibung. Danach Benutzer, Passwort und die Rechte des Benutzers auf der Freigabe (bei TrueNAS die ACL des Datasets).
+- **„Freigabe nicht gefunden“:** Der Freigabename existiert so nicht. Häufig ist es ein Tippfehler oder die falsche Groß- und Kleinschreibung.
+- **„Der Name des NAS konnte nicht aufgelöst werden“:** Trag statt des Namens die IP-Adresse ein. Am besten gibst du dem NAS im Router eine feste Adresse.
+- **„Keine Schreibrechte im Sicherungsordner“:** Der NAS-Benutzer darf in diesem Ordner nicht schreiben. Rechte im NAS anpassen oder einen anderen Ordner wählen.
+- **NAS im Netzwerk suchen findet nichts:** Die Suche fragt mDNS/Bonjour ab (nur wenn `avahi-utils` installiert ist) und prüft im eigenen /24-Netz des Pi, welche Geräte TCP-Port 445 öffnen. Ein NAS in einem anderen Netz oder hinter einer Firewall findet sie nicht. Gib die IP-Adresse dann von Hand ein.
+- **Die Sicherung ist sehr langsam:** Prüfe, ob der Pi per WLAN statt per Kabel verbunden ist (`ip -br addr` zeigt, ob `eth0` eine Adresse hat). Bei aktiver Kabelverbindung bevorzugt der Pi das Kabel automatisch.
+- **Der Ordner ist während der Sicherung leer:** Das ist normal, siehe oben. Die versteckte `.part`-Datei wird erst am Ende zur `.img`-Datei.
 
 ### Unterstützung und Protokolle
 
