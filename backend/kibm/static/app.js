@@ -1060,7 +1060,8 @@ async function pollUsbJob() {
     } else if (status.state === "fehler") {
       $("backup-progress-title").textContent = destination === "existing" ? "Verkleinern fehlgeschlagen" : onNas ? "NAS-Sicherung fehlgeschlagen" : "USB-Sicherung fehlgeschlagen";
       $("backup-progress-value").textContent = "Fehler";
-      $("backup-progress-bar").removeAttribute("value");
+      $("backup-progress-bar").setAttribute("value", "0");
+      $("backup-progress-bar").value = 0;
       if ((status.files || []).length) {
         $("backup-progress-detail").textContent = `Der Shrink ist fehlgeschlagen. Das vollständige Image ist erhalten. ${status.error || ""}`;
         renderUsbFiles(status.files, usbJobId, activeDownloadToken, onNas);
@@ -1073,7 +1074,8 @@ async function pollUsbJob() {
     } else if (status.state === "abgebrochen") {
       $("backup-progress-title").textContent = destination === "existing" ? "Verkleinern abgebrochen" : onNas ? "NAS-Sicherung abgebrochen" : "USB-Sicherung abgebrochen";
       $("backup-progress-value").textContent = "Abgebrochen";
-      $("backup-progress-bar").removeAttribute("value");
+      $("backup-progress-bar").setAttribute("value", "0");
+      $("backup-progress-bar").value = 0;
       if ((status.files || []).length) renderUsbFiles(status.files, usbJobId, activeDownloadToken, onNas);
       $("usb-eject").hidden = onNas;
       if (onNas) loadNasImages();
