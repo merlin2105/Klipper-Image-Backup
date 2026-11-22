@@ -95,8 +95,8 @@
     "KIBM · Systemübersicht": "KIBM · System overview",
     "Klipper Image Backup": "Klipper Image Backup",
     "Systemdiagnose und vollständige Sicherungen deiner Klipper-microSD. Die Systemkarte bleibt unverändert.": "System diagnostics and full backups of your Klipper microSD. The system card remains unchanged.",
-    "SYSTEMKARTE BLEIBT": "SYSTEM CARD UNCHANGED",
-    "USB-Ziel nur nach Auswahl": "USB target only after selection",
+    "System-microSD meldet Fehler": "System microSD reports errors",
+    "Ein-/Ausgabefehler beim Zugriff auf das Sicherungsziel. Prüfe die Verbindung zum NAS bzw. den USB-Stick. Meldet die Statusleiste oben zusätzlich Fehler der System-microSD, liegt es an der Karte.": "Input/output error while accessing the backup destination. Check the connection to the NAS or the USB drive. If the status bar above also reports errors of the system microSD, the card is the cause.",
     "Status wird geladen": "Loading status",
     "Systemdaten werden abgefragt.": "Loading system information.",
     "KLIPPER HOST": "KLIPPER HOST",
@@ -506,6 +506,8 @@
   ];
 
   const patterns = [
+    [/^Kernel-Log seit dem Start: (\d+) Kartenfehler · Dateisystem: (\d+) gespeicherte Fehler\. Die Karte ist wahrscheinlich defekt: Ersetze sie bald \(siehe README\)\.$/, (_match, kernel, filesystem) => `Kernel log since boot: ${kernel} card errors · file system: ${filesystem} recorded errors. The card is probably failing: replace it soon (see README).`],
+    [/^Die System-microSD meldet bei (.+) GB einen Lesefehler\. Die Karte ist wahrscheinlich defekt: Starte keine weitere Sicherung und ersetze die Karte bald\. Wie du die Daten rettest, steht in der README unter „Die System-microSD meldet Lesefehler“\.$/, (_match, position) => `The system microSD reports a read error at ${position.replace(",", ".")} GB. The card is probably failing: do not start another backup and replace the card soon. The README explains how to rescue the data under “The system microSD reports read errors”.`],
     [/^✓ Verbindung OK · (.+) · (.+) frei$/, (_match, target, free) => `✓ Connection OK · ${target} · ${free} free`],
     [/^✓ NAS-Sicherung läuft · (.+)$/, (_match, target) => `✓ NAS backup running · ${target}`],
     [/^✗ (.+)$/, (_match, reason) => `✗ ${translate(reason)}`],

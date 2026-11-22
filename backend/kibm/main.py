@@ -261,6 +261,14 @@ def get_system_metrics():
     return services.system_metrics()
 
 
+@app.get("/api/system/sd-health")
+def get_sd_health():
+    try:
+        return _media_request({"action": "sd_health"}, timeout=30)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+        return {"kernel_checked": False, "kernel_errors": 0, "last_kernel_error": "", "filesystem_errors": 0}
+
+
 @app.get("/api/klipper/status")
 def get_klipper_status():
     return services.klipper_status()

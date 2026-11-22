@@ -63,6 +63,8 @@ Das Dashboard zeigt den erkannten Host, Betriebssystem, Kernel und Architektur s
 
 Der Moonraker-Status wird verwendet, um einen aktiven oder pausierten Druck zu erkennen. Wenn Moonraker nicht erreichbar ist, kann KIBM nicht automatisch prüfen, ob gedruckt wird. In diesem Fall ist vor einer Sicherung eine ausdrückliche Bestätigung nötig.
 
+KIBM prüft außerdem, ob die System-microSD Fehler meldet. Dazu durchsucht es die Kernelmeldungen seit dem letzten Start nach Lese- und Zeitüberschreitungsfehlern der Karte und liest den Fehlerzähler der ext4-Dateisysteme, der auch Neustarts überdauert. Findet es etwas, wird die Statusleiste gelb und zeigt „System-microSD meldet Fehler“; die letzte Kernelmeldung erscheint als Tooltip. Eine Sicherung bleibt trotzdem möglich. Was dann zu tun ist, steht unter [Die System-microSD meldet Lesefehler](#die-system-microsd-meldet-lesefehler).
+
 ### 1. Vollständiges Image auf dem PC speichern
 
 1. Wähle **PC · Vollständiges Image**.
@@ -230,6 +232,19 @@ sudo kibm-admin update
 - **NAS im Netzwerk suchen findet nichts:** Die Suche fragt mDNS/Bonjour ab (nur wenn `avahi-utils` installiert ist) und prüft im eigenen /24-Netz des Pi, welche Geräte TCP-Port 445 öffnen. Ein NAS in einem anderen Netz oder hinter einer Firewall findet sie nicht. Gib die IP-Adresse dann von Hand ein.
 - **Die Sicherung ist sehr langsam:** Prüfe, ob der Pi per WLAN statt per Kabel verbunden ist (`ip -br addr` zeigt, ob `eth0` eine Adresse hat). Bei aktiver Kabelverbindung bevorzugt der Pi das Kabel automatisch.
 - **Der Ordner ist während der Sicherung leer:** Das ist normal, siehe oben. Die versteckte `.part`-Datei wird erst am Ende zur `.img`-Datei.
+
+### Die System-microSD meldet Lesefehler
+
+Bricht eine Sicherung mit „Die System-microSD meldet bei … GB einen Lesefehler“ ab oder zeigt die Statusleiste „System-microSD meldet Fehler“, ist die Karte sehr wahrscheinlich defekt. Billige oder alte Karten gehen nach Jahren Dauerbetrieb oft so kaputt. Typische Begleiterscheinungen: SSH bricht sofort ab, Logs lassen sich nicht mehr lesen, Dienste starten nicht.
+
+1. **Keine weitere Sicherung starten** und möglichst wenig auf dem Pi verändern. Jeder Zugriff kann die Karte weiter beschädigen.
+2. **Pi ausschalten**, die Karte in einen Kartenleser am PC stecken und mit `ddrescue` ein Abbild ziehen. Anders als `dd` überspringt es defekte Bereiche und versucht sie später erneut. Die Gerätedatei vorher mit `lsblk` prüfen:
+   ```bash
+   sudo ddrescue -d -r3 /dev/sdX klipper-sd.img klipper-sd.map
+   ```
+3. Das Abbild auf eine **neue, hochwertige Karte** schreiben und die Dateisysteme mit `fsck` prüfen. Alternativ Klipper neu aufsetzen und nur `printer_data/config` aus dem Abbild übernehmen.
+
+Meldet eine Sicherung dagegen „Ein-/Ausgabefehler beim Zugriff auf das Sicherungsziel“, liegt das Problem beim NAS oder USB-Stick, nicht bei der Karte.
 
 ### Unterstützung und Protokolle
 

@@ -125,6 +125,7 @@ async function loadDashboard() {
         : "Drucker im Standby · vollständige System-microSD erkannt.")
       : currentReadiness.blockers.join(" ");
     $("overall-led").className = currentReadiness.backup_available ? "status-led" : "status-led warning";
+    refreshSdHealth();
     renderPrinter(printer);
     renderStorage(storage);
     renderReadiness(currentReadiness);
@@ -137,6 +138,20 @@ async function loadDashboard() {
     $("footer-time").textContent = `AKTUALISIERT ${new Date().toLocaleTimeString(formatLocale(), { hour: "2-digit", minute: "2-digit" })}`;
   } catch (error) {
     showError(error.message);
+  }
+}
+
+// Warns only; a backup of a failing card can still be worth trying.
+async function refreshSdHealth() {
+  try {
+    const health = await api("/api/system/sd-health");
+    if (!health.kernel_errors && !health.filesystem_errors) return;
+    $("overall-led").className = "status-led warning";
+    $("overall-title").textContent = "System-microSD meldet Fehler";
+    $("overall-description").textContent = `Kernel-Log seit dem Start: ${health.kernel_errors} Kartenfehler · Dateisystem: ${health.filesystem_errors} gespeicherte Fehler. Die Karte ist wahrscheinlich defekt: Ersetze sie bald (siehe README).`;
+    $("overall-description").title = health.last_kernel_error || "";
+  } catch {
+    // The health check is optional; the dashboard works without it.
   }
 }
 

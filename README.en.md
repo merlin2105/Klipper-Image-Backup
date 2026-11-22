@@ -63,6 +63,8 @@ The dashboard displays the detected host, operating system, kernel, and architec
 
 KIBM uses Moonraker status to detect an active or paused print. If Moonraker is unavailable, KIBM cannot automatically check whether a print is running. In that case, an explicit confirmation is required before a backup.
 
+KIBM also checks whether the system microSD reports errors. It searches the kernel messages since the last boot for read and timeout errors of the card and reads the error counter of the ext4 file systems, which survives reboots. If it finds any, the status bar turns yellow and shows “System microSD reports errors”; the latest kernel message appears as a tooltip. A backup is still possible. What to do next is described under [The system microSD reports read errors](#the-system-microsd-reports-read-errors).
+
 ### 1. Save a full image to your PC
 
 1. Select **PC · Full image**.
@@ -230,6 +232,19 @@ sudo kibm-admin update
 - **Search network for NAS finds nothing:** the search uses mDNS/Bonjour (only when `avahi-utils` is installed) and checks which devices in the Pi's own /24 network accept TCP port 445. A NAS in another network or behind a firewall is not found; enter its IP address manually.
 - **The backup is very slow:** check whether the Pi uses Wi-Fi instead of cable (`ip -br addr` shows whether `eth0` has an address). With an active cable connection the Pi prefers it automatically.
 - **The folder is empty during the backup:** expected, see above. The hidden `.part` file becomes the `.img` file at the end.
+
+### The system microSD reports read errors
+
+If a backup stops with “The system microSD reports a read error at … GB” or the status bar shows “System microSD reports errors”, the card is very likely failing. Cheap or old cards often fail this way after years of continuous use. Typical side effects: SSH disconnects immediately, logs can no longer be read, services fail to start.
+
+1. **Do not start another backup** and change as little as possible on the Pi. Every access can damage the card further.
+2. **Shut down the Pi**, put the card into a card reader on your PC and take an image with `ddrescue`. Unlike `dd`, it skips damaged areas and retries them later. Check the device name with `lsblk` first:
+   ```bash
+   sudo ddrescue -d -r3 /dev/sdX klipper-sd.img klipper-sd.map
+   ```
+3. Write the image to a **new, good-quality card** and check the file systems with `fsck`. Alternatively, set up Klipper from scratch and copy only `printer_data/config` from the image.
+
+If a backup instead reports “Input/output error while accessing the backup destination”, the problem is the NAS or the USB drive, not the card.
 
 ### Support and logs
 

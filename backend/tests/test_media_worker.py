@@ -1,3 +1,5 @@
+import errno
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -1138,3 +1140,75 @@ def test_cancelled_pishrink_detaches_its_loop_devices(monkeypatch, tmp_path) -> 
     assert detached == [full.parent / f".{job.job_id}.img.part"]
     assert not final.exists() and full.exists()
     assert not detached[0].exists()
+
+
+def test_a_read_error_of_the_system_card_names_the_card(monkeypatch, tmp_path) -> None:
+    card, data = _source_card(tmp_path)
+    volume, device, _calls = _capture_env(monkeypatch, tmp_path, card)
+    monkeypatch.setattr(media_worker, "CHUNK_BYTES", 512)
+    real_read = os.read
+    reads = []
+
+    def failing_read(fd, size):
+        reads.append(size)
+        if len(reads) == 3:
+            raise OSError(errno.EIO, "Input/output error")
+        return real_read(fd, size)
+
+    monkeypatch.setattr(media_worker.os, "read", failing_read)
+    job = _media_job(64 * 512, len(data))
+
+    media_worker._run_job(job, device, "printer")
+
+    assert job.state == "fehler"
+    assert job.error.startswith("Die System-microSD meldet bei 0,0 GB einen Lesefehler.")
+    assert "wahrscheinlich defekt" in job.error
+    assert list(volume.iterdir()) == []
+
+
+def test_an_io_error_elsewhere_points_at_the_backup_target(monkeypatch, tmp_path) -> None:
+    job = _media_job(512, 512)
+    monkeypatch.setattr(media_worker, "_job", job)
+
+    media_worker._end_failed(OSError(errno.EIO, "Input/output error"), "fehlgeschlagen", "abgebrochen")
+
+    assert job.error == media_worker.TARGET_IO_ERROR
+
+
+def test_sd_health_counts_card_errors_in_the_kernel_log(monkeypatch, tmp_path) -> None:
+    log = "\n".join([
+        "mmc0: new high speed SDHC card at address aaaa",
+        "EXT4-fs (mmcblk0p2): re-mounted. Opts: errors=remount-ro",
+        "I/O error, dev mmcblk0, sector 2048 op 0x0:(READ) flags 0x0 phys_seg 1 prio class 2",
+        "mmc0: Timeout waiting for hardware interrupt.",
+        "usb 1-1.3: device descriptor read/64, error -71",
+        "EXT4-fs error (device mmcblk0p2): ext4_find_entry:1455: inode #2: comm sshd: reading directory lblock 0",
+    ])
+    monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: SimpleNamespace(returncode=0, stdout=log))
+    ext4 = tmp_path / "ext4"
+    (ext4 / "mmcblk0p2").mkdir(parents=True)
+    (ext4 / "mmcblk0p2" / "errors_count").write_text("7\n")
+    (ext4 / "sda1").mkdir()
+    (ext4 / "sda1" / "errors_count").write_text("3\n")
+    monkeypatch.setattr(media_worker, "EXT4_SYSFS", ext4)
+
+    health = media_worker._sd_health()
+
+    assert health == {
+        "kernel_checked": True,
+        "kernel_errors": 3,
+        "last_kernel_error": "EXT4-fs error (device mmcblk0p2): ext4_find_entry:1455: inode #2: comm sshd: reading directory lblock 0",
+        "filesystem_errors": 7,
+    }
+
+
+def test_sd_health_without_a_readable_kernel_log(monkeypatch, tmp_path) -> None:
+    def broken(args, timeout=30):
+        raise OSError("journalctl fehlt")
+
+    monkeypatch.setattr(media_worker, "_run", broken)
+    monkeypatch.setattr(media_worker, "EXT4_SYSFS", tmp_path / "missing")
+
+    assert media_worker._sd_health() == {
+        "kernel_checked": False, "kernel_errors": 0, "last_kernel_error": "", "filesystem_errors": 0,
+    }

@@ -454,3 +454,25 @@ def test_usb_cancel_needs_csrf_and_the_own_job(monkeypatch) -> None:
     response = logged_in.post(url, headers={**ORIGIN, "X-KIBM-CSRF": csrf})
     assert response.status_code == 200 and response.json()["cancel_requested"] is True
     assert {"action": "cancel", "job_id": "job-1"} in calls
+
+
+def test_sd_health_comes_from_the_media_worker(monkeypatch) -> None:
+    health = {"kernel_checked": True, "kernel_errors": 2, "last_kernel_error": "I/O error, dev mmcblk0", "filesystem_errors": 0}
+    requests = []
+    monkeypatch.setattr(main, "_media_request", lambda payload, timeout=15: requests.append(payload) or health)
+
+    response = client.get("/api/system/sd-health")
+
+    assert response.status_code == 200 and response.json() == health
+    assert requests == [{"action": "sd_health"}]
+
+
+def test_sd_health_is_unknown_without_the_media_worker(monkeypatch) -> None:
+    def unavailable(payload, timeout=15):
+        raise OSError("kein Socket")
+
+    monkeypatch.setattr(main, "_media_request", unavailable)
+
+    assert client.get("/api/system/sd-health").json() == {
+        "kernel_checked": False, "kernel_errors": 0, "last_kernel_error": "", "filesystem_errors": 0,
+    }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import grp
@@ -58,6 +59,8 @@ SCAN_PATH = Path("/run/kibm-media/scan")
 # commit the user confirmed in the dashboard.
 UPDATE_COMMIT_PATH = Path("/run/kibm-media/update-commit")
 SOURCE_DEVICE = "/dev/mmcblk0"
+# ext4 keeps an error counter per filesystem in its superblock; it survives reboots.
+EXT4_SYSFS = Path("/sys/fs/ext4")
 PISHRINK_PATH = Path("/opt/klipper-image-backup-manager/tools/pishrink.sh")
 BLOCKGETSIZE64 = 0x80081272
 # Backup progress on the printer (Klipper status line, KlipperScreen banner).
@@ -699,11 +702,56 @@ BACKUP_CANCELLED = "Sicherung wurde abgebrochen. Unvollständige Dateien wurden 
 SHRINK_CANCELLED = "Verkleinern wurde abgebrochen. Die Arbeitskopie wurde gelöscht, das Original ist unverändert."
 
 
+SOURCE_READ_ERROR = (
+    "Die System-microSD meldet bei {position} GB einen Lesefehler. Die Karte ist wahrscheinlich defekt: "
+    "Starte keine weitere Sicherung und ersetze die Karte bald. Wie du die Daten rettest, steht in der README "
+    "unter „Die System-microSD meldet Lesefehler“."
+)
+# Read errors of the system card are translated where the card is read, so an
+# I/O error that arrives here came from the backup target.
+TARGET_IO_ERROR = (
+    "Ein-/Ausgabefehler beim Zugriff auf das Sicherungsziel. Prüfe die Verbindung zum NAS bzw. den USB-Stick. "
+    "Meldet die Statusleiste oben zusätzlich Fehler der System-microSD, liegt es an der Karte."
+)
+
+
 def _end_failed(exc: BaseException, failed: str, cancelled: str, files: Optional[list[dict[str, Any]]] = None) -> None:
     if isinstance(exc, JobCancelled):
         _set_job(state="abgebrochen", phase="abgebrochen", message=cancelled, error=None, files=files or [])
     else:
-        _set_job(state="fehler", phase="fehler", message=failed, error=str(exc), files=files or [])
+        error = TARGET_IO_ERROR if isinstance(exc, OSError) and exc.errno == errno.EIO else str(exc)
+        _set_job(state="fehler", phase="fehler", message=failed, error=error, files=files or [])
+
+
+_CARD_DEVICE = re.compile(r"\bmmc(?:blk)?0")
+_CARD_FAILURE = re.compile(r"\berror\b|timeout|timed out", re.IGNORECASE)
+
+
+def _sd_health() -> dict[str, Any]:
+    """Errors of the system card from the kernel log since boot and the ext4 error counters."""
+    kernel_checked = False
+    kernel_errors: list[str] = []
+    try:
+        log = _run(["journalctl", "--dmesg", "--boot", "--no-pager", "--quiet", "--output=cat"], timeout=20).stdout
+        kernel_checked = True
+        kernel_errors = [
+            line.strip() for line in log.splitlines()
+            if _CARD_DEVICE.search(line) and _CARD_FAILURE.search(line)
+        ]
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Kernel log not readable: %s", exc)
+    filesystem_errors = 0
+    for counter in EXT4_SYSFS.glob("mmcblk0p*/errors_count"):
+        try:
+            filesystem_errors += int(counter.read_text().strip() or 0)
+        except (OSError, ValueError):
+            continue
+    return {
+        "kernel_checked": kernel_checked,
+        "kernel_errors": len(kernel_errors),
+        "last_kernel_error": kernel_errors[-1][:300] if kernel_errors else "",
+        "filesystem_errors": filesystem_errors,
+    }
 
 
 def _fail_job(job: MediaJob, exc: BaseException) -> None:
@@ -799,7 +847,12 @@ def _capture_image(job: MediaJob, directory: Path, hostname: str) -> None:
                         if _printer_active():
                             raise OSError("Moonraker meldet einen aktiven Druck. Image-Datei ist unvollständig.")
                         next_printer_check = time.monotonic() + PRINTER_RECHECK_SECONDS
-                    chunk = os.read(source_fd, min(CHUNK_BYTES, job.image_size - copied))
+                    try:
+                        chunk = os.read(source_fd, min(CHUNK_BYTES, job.image_size - copied))
+                    except OSError as exc:
+                        if exc.errno == errno.EIO:
+                            raise OSError(SOURCE_READ_ERROR.format(position=f"{copied / 1e9:.1f}".replace(".", ","))) from exc
+                        raise
                     if not chunk:
                         raise OSError(f"Die microSD lieferte nur {copied} von {job.image_size} Bytes.")
                     _write_all(output, chunk)
@@ -1071,6 +1124,8 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._status(request)
             elif action == "cancel":
                 self._cancel(request)
+            elif action == "sd_health":
+                self._reply(_sd_health())
             elif action == "current":
                 with _lock:
                     self._reply({"job": _job_data(_job) if _job else None})
