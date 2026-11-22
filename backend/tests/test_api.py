@@ -336,3 +336,104 @@ def test_usb_download_requires_the_token_of_the_own_session(monkeypatch) -> None
     first_session = first.cookies.get("kibm_session")
     main.usb_jobs["job-1"] = {first_session: "first-token"}
     assert second.get("/api/backup/usb/download/job-1/a.img?token=first-token").status_code == 404
+
+
+NAS_POST_ROUTES = ["discover", "shares", "check", "browse", "mkdir", "save", "delete", "images", "start"]
+ORIGIN = {"Origin": "http://testserver"}
+
+
+def _fake_worker(monkeypatch, replies=None):
+    sent = []
+
+    def fake(payload, timeout=15):
+        sent.append(payload)
+        if payload["action"] == "update_status":
+            return {"available": True, "state": "idle"}
+        return (replies or {}).get(payload["action"], {})
+
+    monkeypatch.setattr(main, "_media_request", fake)
+    return sent
+
+
+def test_nas_get_without_session_reveals_only_configured(monkeypatch) -> None:
+    _fake_worker(monkeypatch, {"nas_get": {"configured": True, "server": "h", "share": "S", "username": "u", "folder": "f"}})
+    assert TestClient(app).get("/api/backup/nas").json() == {"configured": True}
+    logged_in, _ = _logged_in_client(monkeypatch)
+    assert logged_in.get("/api/backup/nas").json()["server"] == "h"
+
+
+def test_nas_post_routes_require_session_and_csrf(monkeypatch) -> None:
+    sent = _fake_worker(monkeypatch)
+    anonymous = TestClient(app)
+    logged_in, _ = _logged_in_client(monkeypatch)
+    for route in NAS_POST_ROUTES:
+        assert anonymous.post(f"/api/backup/nas/{route}", json={"confirmed": True}, headers=ORIGIN).status_code == 401, route
+        assert logged_in.post(f"/api/backup/nas/{route}", json={"confirmed": True}, headers=ORIGIN).status_code == 403, route
+    assert not [payload for payload in sent if payload["action"].startswith("nas_")]
+
+
+def test_nas_save_rejects_invalid_input_before_worker(monkeypatch) -> None:
+    sent = _fake_worker(monkeypatch)
+    logged_in, csrf = _logged_in_client(monkeypatch)
+    response = logged_in.post(
+        "/api/backup/nas/save", json={"server": "h", "share": "a/b", "username": "u", "password": "p"},
+        headers={**ORIGIN, "X-KIBM-CSRF": csrf},
+    )
+    assert response.status_code == 400
+    assert not [payload for payload in sent if payload["action"].startswith("nas_")]
+
+
+def test_nas_start_requires_confirmation_and_preflight(monkeypatch) -> None:
+    job = {"job_id": "j", "state": "wird vorbereitet", "files": [], "target": "nas"}
+    sent = _fake_worker(monkeypatch, {"nas_start": {"job": job, "device": {"path": "//h/S/f", "model": "NAS (SMB)", "size_bytes": 0}}})
+    logged_in, csrf = _logged_in_client(monkeypatch)
+    headers = {**ORIGIN, "X-KIBM-CSRF": csrf}
+    assert logged_in.post("/api/backup/nas/start", json={"confirmed": False}, headers=headers).status_code == 400
+    monkeypatch.setattr(services, "backup_preflight", lambda: {"backup_available": False, "blockers": ["Druck läuft"]})
+    assert logged_in.post("/api/backup/nas/start", json={"confirmed": True}, headers=headers).status_code == 409
+    monkeypatch.setattr(services, "backup_preflight", lambda: {"backup_available": True, "blockers": []})
+    response = logged_in.post("/api/backup/nas/start", json={"confirmed": True, "shrink": True}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["device"]["model"] == "NAS (SMB)" and response.json()["download_token"]
+    assert sent[-1] == {"action": "nas_start", "shrink": True, "keep_full": False, "verify_image": True, "confirmed": True}
+
+
+def test_nas_save_forwards_password_but_never_returns_it(monkeypatch) -> None:
+    sent = _fake_worker(monkeypatch, {"nas_save": {"saved": True, "display": "//h/S/f"}})
+    logged_in, csrf = _logged_in_client(monkeypatch)
+    response = logged_in.post(
+        "/api/backup/nas/save", json={"server": "h", "share": "S", "username": "u", "password": "geheim", "folder": "f"},
+        headers={**ORIGIN, "X-KIBM-CSRF": csrf},
+    )
+    assert response.status_code == 200 and "geheim" not in response.text
+    assert sent[-1]["password"] == "geheim" and sent[-1]["action"] == "nas_save"
+
+
+def test_nas_worker_errors_become_conflicts(monkeypatch) -> None:
+    def fake(payload, timeout=15):
+        raise ValueError("NAS nicht erreichbar.")
+
+    monkeypatch.setattr(main, "_media_request", fake)
+    logged_in, csrf = _logged_in_client(monkeypatch)
+    response = logged_in.post("/api/backup/nas/browse", json={}, headers={**ORIGIN, "X-KIBM-CSRF": csrf})
+    assert response.status_code == 409 and response.json()["detail"] == "NAS nicht erreichbar."
+
+
+def test_nas_routes_run_in_the_threadpool() -> None:
+    import inspect
+
+    routes = {route.path: route for route in app.routes if getattr(route, "path", "").startswith("/api/backup/nas")}
+    assert set(routes) == {"/api/backup/nas"} | {f"/api/backup/nas/{name}" for name in NAS_POST_ROUTES}
+    assert not any(inspect.iscoroutinefunction(route.endpoint) for route in routes.values())
+
+
+def test_nas_timeout_gets_a_readable_message(monkeypatch) -> None:
+    def fake(payload, timeout=15):
+        assert timeout >= 120
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(main, "_media_request", fake)
+    logged_in, csrf = _logged_in_client(monkeypatch)
+    response = logged_in.post("/api/backup/nas/images", json={}, headers={**ORIGIN, "X-KIBM-CSRF": csrf})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Das NAS hat zu lange nicht geantwortet. Prüfe den Status mit „Erneut prüfen“."

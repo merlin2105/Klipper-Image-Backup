@@ -85,11 +85,24 @@ The **Shrink the full backup with PiShrink** option creates a smaller copy on th
 
 After completion, you can download the image through your browser. Then use **Safely eject USB drive** before unplugging it.
 
-### 3. Inspect, shrink, or delete an existing USB image
+### 3. Back up a full image to a NAS (SMB)
 
-When KIBM finds `.img` files on a detected USB drive, **Image on USB drive** appears. KIBM checks the actual image contents, regardless of the filename. It reads partition and filesystem information and displays found images as selectable tiles.
+For printers whose built-in Pi has no reachable USB port, KIBM can write the image directly to a folder on a Windows or NAS share (SMB, e.g. Synology, TrueNAS).
 
-- **Shrink:** PiShrink is offered only when the filesystem can be checked safely and at least 256 MB of potential savings are estimated. KIBM creates a new copy on the same USB drive and keeps the original.
+1. Choose **NAS (SMB) · Backup** and sign in with the Pi account.
+2. **Search network for NAS** lists devices to click, or enter the IP address or name manually. A pasted address such as `\\192.168.1.100\Backup` is split automatically.
+3. Enter user and password. **Show shares** lists the NAS shares. The share name must match exactly, including upper/lower case.
+4. **Connect**, choose or create the backup folder, **Use this folder**.
+
+Afterwards, selecting the NAS card checks the connection and shows **✓ Connection OK** with free space, or a red reason. The options (PiShrink, keep full image, verify) and the process (journal flush, copy, verify, `e2fsck`, shrink) match the USB backup; nothing is formatted on the NAS. **Change credentials** and **Remove connection** sit below the status line; an empty password field keeps the saved password only while NAS, share and user stay the same.
+
+KIBM mounts the share only while an action runs, inside the sandboxed media service, and never changes `/etc/fstab`, so a switched-off NAS never delays booting. Connect the Pi by network cable for NAS backups if possible: in testing a Pi 4 wrote 78 MB/s to the NAS over cable and only 4.6 MB/s over Wi-Fi.
+
+### 4. Inspect, shrink, or delete an existing image
+
+When KIBM finds `.img` files on a detected USB drive or in the NAS backup folder, **Existing images** appears. NAS images are only listed when signed in, and only when the page loads, after a NAS backup, or via **Reload NAS images**, so the NAS can sleep. KIBM checks the actual image contents, regardless of the filename. It reads partition and filesystem information and displays found images as selectable tiles.
+
+- **Shrink:** PiShrink is offered only when the filesystem can be checked safely and at least 256 MB of potential savings are estimated. KIBM creates a new copy in the same location and keeps the original.
 - **Already compact or not safe to inspect:** KIBM will not offer another shrink.
 - **Delete:** Removes only the selected `.img` file. A custom confirmation dialog and, when needed, Pi account sign-in are required. Deletion cannot be undone.
 
@@ -109,6 +122,7 @@ Before updating, the installer snapshots the last installed KIBM version and its
 - **Running Pi:** KIBM captures the image while the Pi stays on. Files and system state can change during the read, so a successful image is not proof of a consistent snapshot or a successful restore.
 - **Print status:** A print reported as active or paused by Moonraker blocks the backup. Without Moonraker, automatic print monitoring is unavailable; continue only if you are sure no print is running or about to start.
 - **USB target:** Only the explicitly selected drive is formatted as exFAT for a USB backup. This is destructive and erases existing data on that drive.
+- **NAS credentials:** The NAS password is stored only in `/var/lib/kibm-media/nas-credentials` (readable by root only) and is never sent back to the browser. The share is mounted only while an action runs; on the NAS, KIBM deletes only the explicitly selected `.img` file.
 - **Password:** KIBM checks the existing Linux account through PAM. It does not store or change the password. The web interface uses local HTTPS and CSRF-protected actions.
 - **Permissions:** The web process runs unprivileged. Authentication and media operations run through separate local services. The media worker accepts fixed operations rather than arbitrary shell commands.
 - **Network:** Do not expose port 8765 to the public internet. Use KIBM on a trusted local network.

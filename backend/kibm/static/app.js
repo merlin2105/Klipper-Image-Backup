@@ -16,6 +16,12 @@ let usbImages = [];
 let imageScanInProgress = false;
 let pendingDeleteImageId = null;
 let updatePoll = null;
+let nasSettings = { configured: false };
+let nasStatus = { state: "idle" };
+let nasEditing = false;
+let nasBrowsePath = "";
+let nasImages = [];
+let nasImagesLoaded = false;
 const UPDATE_TARGET_KEY = "kibm-update-target";
 
 async function api(path, options = {}) {
@@ -119,6 +125,8 @@ async function loadDashboard() {
     renderStorage(storage);
     renderReadiness(currentReadiness);
     if (session.authenticated) await resumeUsbJob();
+    await loadNasSettings();
+    if (session.authenticated && nasSettings.configured && !nasImagesLoaded) loadNasImages();
     await loadUsbDevices();
     updateDestination();
     refreshUpdateStatus();
@@ -186,14 +194,19 @@ async function loadUsbDevices() {
   usbScanInProgress = false;
 }
 
-function renderExistingImages(images) {
+function allImages() {
+  return [...usbImages, ...nasImages];
+}
+
+function renderExistingImages(images = usbImages) {
   const select = $("existing-image");
   const choices = $("existing-image-choices");
   const selected = select.value;
   usbImages = images;
+  const listed = allImages();
   select.replaceChildren(new Option("Image auswählen", ""));
   choices.replaceChildren();
-  for (const image of images) {
+  for (const image of listed) {
     const status = image.shrinkability?.status === "shrinkable"
       ? `noch ca. ${formatBytes(image.shrinkability.estimated_savings_bytes)} verkleinerbar`
       : image.shrinkability?.status === "already_compact" ? "bereits kompakt" : "nicht sicher prüfbar";
@@ -207,7 +220,7 @@ function renderExistingImages(images) {
     const filename = document.createElement("strong");
     filename.textContent = image.filename;
     const size = document.createElement("small");
-    size.textContent = formatBytes(image.size_bytes);
+    size.textContent = `${image.location === "nas" ? "NAS" : "USB-Stick"} · ${formatBytes(image.size_bytes)}`;
     const analysis = document.createElement("span");
     analysis.textContent = status;
     choice.append(filename, size, analysis);
@@ -220,8 +233,8 @@ function renderExistingImages(images) {
     });
     choices.append(choice);
   }
-  if (images.some(image => image.id === selected)) select.value = selected;
-  if (destination === "existing" && !images.length && !activeJobId) destination = null;
+  if (listed.some(image => image.id === selected)) select.value = selected;
+  if (destination === "existing" && !listed.length && !activeJobId) destination = null;
   updateDestination();
 }
 
@@ -392,9 +405,11 @@ function requiredUsbCapacity(shrink) {
 }
 
 function updateDestination() {
+  renderNas();
   const usbMode = isUsbDestination();
   const existingMode = destination === "existing";
-  const existingImage = usbImages.find(image => image.id === $("existing-image").value);
+  const nasMode = destination === "nas";
+  const existingImage = allImages().find(image => image.id === $("existing-image").value);
   const existingCanShrink = existingImage?.shrinkability?.status === "shrinkable";
   const device = selectedUsbDevice();
   const shrink = $("shrink-image").checked;
@@ -402,7 +417,13 @@ function updateDestination() {
   $("destination-pc").disabled = running;
   $("destination-usb").disabled = running || usbDevices.length === 0;
   $("destination-existing").disabled = running;
-  $("destination-existing").hidden = !usbImages.length;
+  $("destination-existing").hidden = !allImages().length;
+  $("destination-nas").disabled = running;
+  $("destination-nas").setAttribute("aria-pressed", String(nasMode));
+  $("nas-options").hidden = !nasMode;
+  const nasReady = nasMode && nasStatus.state === "ok" && !nasEditing;
+  $("image-options").hidden = !(usbMode || nasReady);
+  $("reload-nas-images").hidden = !(csrfToken && nasSettings.configured);
   $("destination-existing").setAttribute("aria-pressed", String(existingMode));
   $("destination-pc").setAttribute("aria-pressed", String(destination === "pc"));
   $("destination-usb").setAttribute("aria-pressed", String(usbMode));
@@ -410,9 +431,9 @@ function updateDestination() {
   $("usb-options").hidden = !usbMode;
   $("existing-options").hidden = !existingMode;
   $("keep-full-row").hidden = !shrink;
-  $("backup-confirmations").hidden = !destination;
+  $("backup-confirmations").hidden = !destination || (nasMode && !nasReady);
   $("format-confirm-row").hidden = !usbMode || !device;
-  $("start-backup").hidden = !destination;
+  $("start-backup").hidden = !destination || (nasMode && !nasReady);
   $("start-backup").textContent = existingMode ? "Image verkleinern" : "Image erstellen";
   const ready = existingMode
     ? Boolean(readiness && readiness.printer?.classification !== "active")
@@ -428,9 +449,12 @@ function updateDestination() {
   $("existing-image-choices").querySelectorAll(".existing-image-choice").forEach((choice) => { choice.disabled = running; });
   const minimumUsbBytes = requiredUsbCapacity(shrink);
   const targetTooSmall = Boolean(usbMode && device && minimumUsbBytes && device.size_bytes < minimumUsbBytes);
+  const minimumNasBytes = requiredUsbCapacity(shrink) - (minimumUsbBytes ? USB_FORMAT_HEADROOM_BYTES : 0);
+  const nasTooSmall = Boolean(nasMode && nasStatus.state === "ok" && minimumNasBytes && nasStatus.free < minimumNasBytes);
   $("start-backup").disabled = !destination || !ready || running || !$("backup-confirm").checked
     || (existingMode && (!$("existing-image").value || !existingCanShrink))
-    || (usbMode && (!device || targetTooSmall || !$("format-confirm").checked));
+    || (usbMode && (!device || targetTooSmall || !$("format-confirm").checked))
+    || (nasMode && (nasStatus.state !== "ok" || nasTooSmall));
   let capacityMessage = "";
   if (targetTooSmall) {
     const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString(formatLocale(), { maximumFractionDigits: 2 })} GiB`;
@@ -439,6 +463,10 @@ function updateDestination() {
     capacityMessage += shrink && device.size_bytes >= requiredUsbCapacity(false)
       ? " Entferne den Haken bei „Image … verkleinern“, um das vollständige Image auf diesem Stick zu sichern."
       : " Wähle einen größeren Stick oder sichere das Image auf dem PC.";
+  }
+  if (nasTooSmall) {
+    const gib = bytes => `${(bytes / 1024 ** 3).toLocaleString(formatLocale(), { maximumFractionDigits: 2 })} GiB`;
+    capacityMessage = `Zu wenig Platz auf dem NAS: frei ${gib(nasStatus.free)}, benötigt rund ${gib(minimumNasBytes)}.`;
   }
   $("usb-capacity-message").textContent = capacityMessage;
 }
@@ -539,14 +567,16 @@ $("check-update-button").addEventListener("click", async () => {
   }
 });
 
-for (const target of ["pc", "usb", "existing"]) {
+for (const target of ["pc", "usb", "nas", "existing"]) {
   $(`destination-${target}`).addEventListener("click", () => {
     if (destination !== target) {
       destination = target;
       $("backup-confirm").checked = false;
       $("format-confirm").checked = false;
+      if (target === "nas" && csrfToken && nasSettings.configured && !nasEditing) checkNas();
     }
     renderUsbDetection();
+    renderNas();
     updateDestination();
   });
 }
@@ -554,7 +584,7 @@ $("backup-confirm").addEventListener("change", updateDestination);
 $("format-confirm").addEventListener("change", updateDestination);
 $("existing-image").addEventListener("change", updateDestination);
 $("delete-existing-image").addEventListener("click", async () => {
-  const image = usbImages.find(item => item.id === $("existing-image").value);
+  const image = allImages().find(item => item.id === $("existing-image").value);
   if (!image) return;
   pendingDeleteImageId = image.id;
   $("delete-image-detail").textContent = `${image.filename} · ${formatBytes(image.size_bytes)}`;
@@ -577,7 +607,7 @@ $("delete-existing-image").addEventListener("click", async () => {
 
 $("delete-image-cancel").addEventListener("click", () => $("delete-image-dialog").close());
 $("delete-image-confirm").addEventListener("click", async () => {
-  const image = usbImages.find(item => item.id === pendingDeleteImageId);
+  const image = allImages().find(item => item.id === pendingDeleteImageId);
   if (!image) {
     $("delete-image-error").textContent = "Das ausgewählte Image ist nicht mehr verfügbar. Scanne den Stick erneut.";
     return;
@@ -602,8 +632,13 @@ $("delete-image-confirm").addEventListener("click", async () => {
     await api("/api/backup/usb/images/delete", { method: "POST", body: JSON.stringify({ image_id: image.id, confirmed: true }) });
     $("delete-image-dialog").close();
     pendingDeleteImageId = null;
-    await loadExistingImages();
-    $("preflight-message").textContent = `Image „${image.filename}“ wurde vom USB-Stick gelöscht.`;
+    if (image.location === "nas") {
+      await loadNasImages();
+      $("preflight-message").textContent = `Image „${image.filename}“ wurde vom NAS gelöscht.`;
+    } else {
+      await loadExistingImages();
+      $("preflight-message").textContent = `Image „${image.filename}“ wurde vom USB-Stick gelöscht.`;
+    }
   } catch (error) {
     $("delete-image-error").textContent = error.message;
     if (error.status === 401) {
@@ -746,14 +781,16 @@ $("start-backup").addEventListener("click", async () => {
     csrfToken = session.authenticated ? session.csrf_token : "";
     $("pi-auth-fields").hidden = session.authenticated;
     $("backup-dialog-title").textContent = session.authenticated ? "Image-Erstellung bestätigen" : "Mit deinem Pi-Konto anmelden";
-    $("dialog-submit-label").textContent = isUsbDestination() ? "USB-Image erstellen" : "Image herunterladen";
+    $("dialog-submit-label").textContent = isUsbDestination() ? "USB-Image erstellen" : destination === "nas" ? "NAS-Image erstellen" : "Image herunterladen";
     $("backup-login-error").textContent = "";
     $("pi-password").required = !session.authenticated;
     $("pi-password").value = "";
     if (destination === "existing") {
       $("dialog-submit-label").textContent = "Image verkleinern";
-      const image = usbImages.find(item => item.id === $("existing-image").value);
-      $("backup-dialog-detail").textContent = `${image.filename} · Verkleinerte Kopie auf ${image.partition}.`;
+      const image = allImages().find(item => item.id === $("existing-image").value);
+      $("backup-dialog-detail").textContent = `${image.filename} · Verkleinerte Kopie auf ${image.location === "nas" ? nasSettings.display : image.partition}.`;
+    } else if (destination === "nas") {
+      $("backup-dialog-detail").textContent = `Ziel: ${nasSettings.display}. Auf dem NAS wird nichts formatiert.`;
     } else if (isUsbDestination()) {
       const target = selectedUsbDevice();
       $("backup-dialog-detail").textContent = target
@@ -801,6 +838,20 @@ $("backup-form").addEventListener("submit", async (event) => {
       activeJobType = "usb";
       activeDownloadToken = result.download_token;
       usbJobId = result.job_id;
+    } else if (destination === "nas") {
+      result = await api("/api/backup/nas/start", {
+        method: "POST",
+        body: JSON.stringify({
+          shrink: $("shrink-image").checked,
+          keep_full: $("keep-full-image").checked,
+          verify_image: $("verify-image").checked,
+          confirmed: $("backup-confirm").checked,
+        }),
+        signal: AbortSignal.timeout(130000),
+      });
+      activeJobType = "usb";
+      activeDownloadToken = result.download_token;
+      usbJobId = result.job_id;
     } else if (isUsbDestination()) {
       const target = selectedUsbDevice();
       if (!target) throw new Error("Bitte zuerst einen erkannten USB-Stick auswählen.");
@@ -830,11 +881,13 @@ $("backup-form").addEventListener("submit", async (event) => {
     $("backup-confirm").checked = false;
     $("format-confirm").checked = false;
     $("backup-progress").hidden = false;
-    $("backup-progress-title").textContent = activeJobType === "usb" ? "USB-Auftrag gestartet" : "Download bereit";
+    $("backup-progress-title").textContent = result.target === "nas" ? "NAS-Auftrag gestartet" : activeJobType === "usb" ? "USB-Auftrag gestartet" : "Download bereit";
     $("backup-progress-value").textContent = "0 %";
     $("backup-progress-bar").value = 0;
     $("backup-progress-bar").setAttribute("value", "0");
-    $("backup-progress-detail").textContent = activeJobType === "usb"
+    $("backup-progress-detail").textContent = result.target === "nas"
+      ? `NAS ${result.device.path} · ${result.message}`
+      : activeJobType === "usb"
       ? `USB-Stick ${result.device.path} · ${result.message}`
       : `${result.filename} · ${formatBytes(result.size_bytes)}. Wähle den Speicherort im Browser.`;
     const download = $("backup-download");
@@ -927,7 +980,7 @@ async function resumeUsbJob() {
     activeJobId = job.job_id;
     $("backup-progress").hidden = false;
     $("backup-download").hidden = true;
-    $("backup-progress-title").textContent = "USB-Auftrag gefunden";
+    $("backup-progress-title").textContent = job.target === "nas" ? "NAS-Auftrag gefunden" : "USB-Auftrag gefunden";
     $("backup-progress-detail").textContent = job.error || job.message;
     pollTransfer();
   } catch {
@@ -939,10 +992,11 @@ async function pollUsbJob() {
   if (!activeJobId) return;
   try {
     const status = await api(`/api/backup/usb/jobs/${activeJobId}`);
+    const onNas = status.target === "nas";
     $("backup-progress-detail").textContent = status.error || status.message;
     if (status.state === "sichern") {
       const percent = status.image_size_bytes ? Math.min(100, status.sent_bytes / status.image_size_bytes * 100) : 0;
-      $("backup-progress-title").textContent = "Vollständiges Image wird auf USB gesichert";
+      $("backup-progress-title").textContent = onNas ? "Vollständiges Image wird auf das NAS gesichert" : "Vollständiges Image wird auf USB gesichert";
       $("backup-progress-value").textContent = `${Math.floor(percent)} %`;
       $("backup-progress-bar").value = percent;
       $("backup-progress-detail").textContent = `${formatBytes(status.sent_bytes)} von ${formatBytes(status.image_size_bytes)} geschrieben.`;
@@ -958,7 +1012,7 @@ async function pollUsbJob() {
         $("backup-progress-detail").textContent = status.message;
       }
     } else if (status.state === "verifizieren") {
-      $("backup-progress-title").textContent = "Image auf dem USB-Stick wird geprüft";
+      $("backup-progress-title").textContent = onNas ? "Image auf dem NAS wird geprüft" : "Image auf dem USB-Stick wird geprüft";
       showMeasuredProgress(status.verified_bytes, status.image_size_bytes);
       $("backup-progress-detail").textContent = `${formatBytes(status.verified_bytes)} von ${formatBytes(status.image_size_bytes)} für SHA-256 gelesen.`;
     } else if (status.state === "reparieren") {
@@ -975,29 +1029,31 @@ async function pollUsbJob() {
       $("backup-progress-value").textContent = "exFAT";
       $("backup-progress-bar").removeAttribute("value");
     } else if (status.state === "bereit") {
-      $("backup-progress-title").textContent = "Image auf USB bereit";
+      $("backup-progress-title").textContent = onNas ? "Image auf dem NAS gespeichert" : "Image auf USB bereit";
       $("backup-progress-value").textContent = "Fertig";
       $("backup-progress-bar").setAttribute("value", "100");
       $("backup-progress-bar").value = 100;
-      renderUsbFiles(status.files || [], usbJobId, activeDownloadToken);
-      $("usb-eject").hidden = false;
+      renderUsbFiles(status.files || [], usbJobId, activeDownloadToken, onNas);
+      $("usb-eject").hidden = onNas;
+      if (onNas) loadNasImages();
       activeJobId = null;
       updateDestination();
       return;
     } else if (status.state === "fehler") {
-      $("backup-progress-title").textContent = destination === "existing" ? "Verkleinern fehlgeschlagen" : "USB-Sicherung fehlgeschlagen";
+      $("backup-progress-title").textContent = destination === "existing" ? "Verkleinern fehlgeschlagen" : onNas ? "NAS-Sicherung fehlgeschlagen" : "USB-Sicherung fehlgeschlagen";
       $("backup-progress-value").textContent = "Fehler";
       $("backup-progress-bar").removeAttribute("value");
       if ((status.files || []).length) {
         $("backup-progress-detail").textContent = `Der Shrink ist fehlgeschlagen. Das vollständige Image ist erhalten. ${status.error || ""}`;
-        renderUsbFiles(status.files, usbJobId, activeDownloadToken);
+        renderUsbFiles(status.files, usbJobId, activeDownloadToken, onNas);
       }
-      $("usb-eject").hidden = false;
+      $("usb-eject").hidden = onNas;
+      if (onNas) loadNasImages();
       activeJobId = null;
       updateDestination();
       return;
     } else if (status.state === "wird vorbereitet") {
-      $("backup-progress-title").textContent = "USB-Ziel wird geprüft";
+      $("backup-progress-title").textContent = onNas ? "NAS-Verbindung wird geprüft" : "USB-Ziel wird geprüft";
       $("backup-progress-value").textContent = "—";
       $("backup-progress-bar").removeAttribute("value");
     }
@@ -1009,7 +1065,7 @@ async function pollUsbJob() {
   }
 }
 
-function renderUsbFiles(files, jobId, token) {
+function renderUsbFiles(files, jobId, token, onNas = false) {
   const container = $("usb-results");
   container.replaceChildren();
   for (const file of files) {
@@ -1022,6 +1078,14 @@ function renderUsbFiles(files, jobId, token) {
     const details = document.createElement("small");
     details.textContent = `${file.filename} · ${formatBytes(file.size_bytes)} · SHA-256 ${file.sha256}`;
     copy.append(title, details);
+    if (onNas) {
+      const where = document.createElement("small");
+      where.textContent = `Gespeichert auf ${nasSettings.display || "dem NAS"}`;
+      copy.append(where);
+      row.append(copy);
+      container.append(row);
+      continue;
+    }
     const link = document.createElement("a");
     link.className = "download-link";
     link.href = `/api/backup/usb/download/${encodeURIComponent(jobId)}/${encodeURIComponent(file.filename)}?token=${encodeURIComponent(token)}`;
@@ -1055,9 +1119,295 @@ window.addEventListener("kibm:languagechange", async () => {
   if (usbDevices.some((device) => device.path === selectedPath)) $("usb-device").value = selectedPath;
   renderExistingImages(usbImages);
   renderUsbDetection();
+  renderNas();
   await loadDashboard();
   refreshSystemMetrics();
 });
+const NAS_ADDRESS = /^(?:smb:)?[/\\]{2}([^/\\]+)[/\\]+([^/\\]+)[/\\]*$/i;
+
+async function loadNasSettings() {
+  try {
+    nasSettings = await api("/api/backup/nas");
+  } catch {
+    nasSettings = { configured: false };
+  }
+  renderNas();
+}
+
+function renderNas() {
+  const loggedIn = Boolean(csrfToken);
+  $("destination-nas-detail").textContent = nasSettings.configured
+    ? (nasSettings.display || "Verbindung gespeichert")
+    : "Auf Netzwerkfreigabe speichern";
+  $("nas-login").hidden = loggedIn;
+  $("nas-connected").hidden = !loggedIn || !nasSettings.configured || nasEditing;
+  $("nas-setup").hidden = !loggedIn || (nasSettings.configured && !nasEditing);
+  $("nas-cancel-edit").hidden = !nasEditing;
+  $("nas-password-hint").hidden = !nasEditing;
+  const status = $("nas-status");
+  status.className = `nas-status ${nasStatus.state === "busy" ? "ok" : nasStatus.state}`;
+  status.textContent = nasStatus.state === "checking"
+    ? "Verbindung wird geprüft …"
+    : nasStatus.state === "ok"
+      ? `✓ Verbindung OK · ${nasStatus.display} · ${formatBytes(nasStatus.free)} frei`
+      : nasStatus.state === "busy"
+        ? `✓ NAS-Sicherung läuft · ${nasStatus.display}`
+        : nasStatus.state === "error" ? `✗ ${nasStatus.text}` : "";
+}
+
+function nasLoggedOut(error) {
+  if (error.status !== 401) return false;
+  csrfToken = "";
+  renderNas();
+  return true;
+}
+
+async function checkNas() {
+  nasStatus = { state: "checking" };
+  renderNas();
+  updateDestination();
+  try {
+    const result = await api("/api/backup/nas/check", { method: "POST", body: "{}", signal: AbortSignal.timeout(130000) });
+    nasStatus = result.ok
+      ? { state: result.busy ? "busy" : "ok", display: result.display, free: result.free_bytes }
+      : { state: "error", text: window.KIBM_I18N?.translate(result.error) || result.error };
+  } catch (error) {
+    nasStatus = { state: "error", text: error.message };
+    nasLoggedOut(error);
+  }
+  renderNas();
+  updateDestination();
+}
+
+async function loadNasImages() {
+  if (!csrfToken || !nasSettings.configured) {
+    nasImages = [];
+    renderExistingImages();
+    return;
+  }
+  nasImagesLoaded = true;
+  try {
+    const result = await api("/api/backup/nas/images", { method: "POST", body: "{}", signal: AbortSignal.timeout(130000) });
+    if (!result.busy) nasImages = result.images || [];
+  } catch (error) {
+    nasImages = [];
+    nasLoggedOut(error);
+  }
+  renderExistingImages();
+}
+
+function splitNasAddress() {
+  const match = $("nas-server").value.trim().match(NAS_ADDRESS);
+  if (match) {
+    $("nas-server").value = match[1];
+    $("nas-share").value = match[2];
+  }
+}
+
+function nasForm() {
+  splitNasAddress();
+  return {
+    server: $("nas-server").value.trim(),
+    share: $("nas-share").value.trim(),
+    username: $("nas-username").value.trim(),
+    password: $("nas-password").value,
+  };
+}
+
+function nasChip(label, detail, onClick) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "nas-chip";
+  chip.textContent = label;
+  if (detail) {
+    const small = document.createElement("small");
+    small.textContent = detail;
+    chip.append(small);
+  }
+  chip.addEventListener("click", onClick);
+  return chip;
+}
+
+async function nasAction(button, action) {
+  button.disabled = true;
+  $("nas-setup-error").textContent = "";
+  try {
+    await action();
+  } catch (error) {
+    $("nas-setup-error").textContent = error.message;
+    nasLoggedOut(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function browseNas(path) {
+  const result = await api("/api/backup/nas/browse", {
+    method: "POST", body: JSON.stringify({ ...nasForm(), path }), signal: AbortSignal.timeout(130000),
+  });
+  nasBrowsePath = result.path;
+  $("nas-browser").hidden = false;
+  const crumbs = $("nas-breadcrumb");
+  crumbs.replaceChildren();
+  const parts = nasBrowsePath ? nasBrowsePath.split("/") : [];
+  const crumb = (label, target) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => nasAction(button, () => browseNas(target)));
+    return button;
+  };
+  crumbs.append(crumb(`//${nasForm().server}/${nasForm().share}`, ""));
+  parts.forEach((part, index) => {
+    crumbs.append(document.createTextNode("›"), crumb(part, parts.slice(0, index + 1).join("/")));
+  });
+  const folders = $("nas-folders");
+  folders.replaceChildren(...result.folders.map(name => nasChip(name, "", (event) => {
+    nasAction(event.currentTarget, () => browseNas(nasBrowsePath ? `${nasBrowsePath}/${name}` : name));
+  })));
+}
+
+$("nas-server").addEventListener("change", splitNasAddress);
+$("nas-server").addEventListener("paste", () => window.setTimeout(splitNasAddress));
+for (const id of ["nas-server", "nas-share", "nas-username", "nas-password"]) {
+  $(id).addEventListener("input", () => { $("nas-browser").hidden = true; });
+}
+
+$("nas-login-button").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  $("nas-login-error").textContent = "";
+  try {
+    const password = $("nas-login-password").value;
+    if (!password) throw new Error("Gib zuerst dein bestehendes Pi-Passwort ein.");
+    const login = await api("/api/login", { method: "POST", body: JSON.stringify({ password }) });
+    csrfToken = login.csrf_token;
+    $("nas-login-password").value = "";
+    await loadNasSettings();
+    if (nasSettings.configured) {
+      checkNas();
+      loadNasImages();
+    }
+    updateDestination();
+  } catch (error) {
+    $("nas-login-error").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+$("nas-login-password").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") $("nas-login-button").click();
+});
+
+$("nas-discover").addEventListener("click", (event) => nasAction(event.currentTarget, async () => {
+  $("nas-discover-status").textContent = "Suche läuft …";
+  $("nas-devices").replaceChildren();
+  try {
+    const { devices } = await api("/api/backup/nas/discover", { method: "POST", body: "{}", signal: AbortSignal.timeout(130000) });
+    $("nas-discover-status").textContent = devices.length ? "Gerät anklicken, um es zu übernehmen." : "Kein NAS gefunden. Gib die IP-Adresse manuell ein.";
+    $("nas-devices").replaceChildren(...devices.map(device => nasChip(device.name, device.name === device.address ? "" : device.address, () => {
+      $("nas-server").value = device.address;
+      $("nas-devices").querySelectorAll(".nas-chip").forEach(chip => chip.setAttribute("aria-pressed", "false"));
+      $("nas-browser").hidden = true;
+    })));
+  } catch (error) {
+    $("nas-discover-status").textContent = "";
+    throw error;
+  }
+}));
+
+$("nas-list-shares").addEventListener("click", (event) => nasAction(event.currentTarget, async () => {
+  const form = nasForm();
+  if (!form.server || !form.username) throw new Error("Gib zuerst IP-Adresse oder Name des NAS und den Benutzer ein.");
+  const { shares } = await api("/api/backup/nas/shares", {
+    method: "POST", body: JSON.stringify({ ...form, share: "" }), signal: AbortSignal.timeout(130000),
+  });
+  if (!shares.length) throw new Error("Das NAS meldet keine Freigaben für diesen Benutzer.");
+  $("nas-shares").replaceChildren(...shares.map(name => nasChip(name, "", () => {
+    $("nas-share").value = name;
+    $("nas-browser").hidden = true;
+  })));
+}));
+
+$("nas-connect").addEventListener("click", (event) => nasAction(event.currentTarget, async () => {
+  const form = nasForm();
+  if (!form.server || !form.share || !form.username) throw new Error("Bitte IP-Adresse oder Name des NAS, Freigabename und Benutzer angeben.");
+  if (!form.password && !nasEditing) throw new Error("Bitte das Passwort eingeben.");
+  try {
+    await browseNas(nasEditing ? nasSettings.folder || "" : "");
+  } catch (error) {
+    if (!nasEditing || !nasSettings.folder) throw error;
+    await browseNas("");
+  }
+}));
+
+$("nas-mkdir").addEventListener("click", (event) => nasAction(event.currentTarget, async () => {
+  const name = $("nas-new-folder").value.trim();
+  if (!name) throw new Error("Gib einen Namen für den neuen Ordner ein.");
+  const result = await api("/api/backup/nas/mkdir", {
+    method: "POST", body: JSON.stringify({ ...nasForm(), path: nasBrowsePath, name }), signal: AbortSignal.timeout(130000),
+  });
+  $("nas-new-folder").value = "";
+  await browseNas(result.path);
+}));
+
+$("nas-save").addEventListener("click", (event) => nasAction(event.currentTarget, async () => {
+  await api("/api/backup/nas/save", {
+    method: "POST", body: JSON.stringify({ ...nasForm(), folder: nasBrowsePath }), signal: AbortSignal.timeout(130000),
+  });
+  $("nas-password").value = "";
+  $("nas-browser").hidden = true;
+  $("nas-shares").replaceChildren();
+  nasEditing = false;
+  await loadNasSettings();
+  checkNas();
+  loadNasImages();
+}));
+
+$("nas-recheck").addEventListener("click", checkNas);
+
+$("nas-edit").addEventListener("click", () => {
+  nasEditing = true;
+  $("nas-server").value = nasSettings.server || "";
+  $("nas-share").value = nasSettings.share || "";
+  $("nas-username").value = nasSettings.username || "";
+  $("nas-password").value = "";
+  $("nas-browser").hidden = true;
+  $("nas-setup-error").textContent = "";
+  renderNas();
+  updateDestination();
+});
+
+$("nas-cancel-edit").addEventListener("click", () => {
+  nasEditing = false;
+  $("nas-password").value = "";
+  renderNas();
+  updateDestination();
+});
+
+$("nas-remove").addEventListener("click", async (event) => {
+  const question = `NAS-Verbindung ${nasSettings.display} entfernen? Die Images auf dem NAS bleiben erhalten.`;
+  if (!window.confirm(window.KIBM_I18N?.translate(question) || question)) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await api("/api/backup/nas/delete", { method: "POST", body: "{}" });
+    nasStatus = { state: "idle" };
+    nasImages = [];
+    await loadNasSettings();
+    renderExistingImages();
+  } catch (error) {
+    nasStatus = { state: "error", text: error.message };
+    nasLoggedOut(error);
+    renderNas();
+  } finally {
+    button.disabled = false;
+    updateDestination();
+  }
+});
+
+$("reload-nas-images").addEventListener("click", loadNasImages);
+
 loadDashboard();
 pollSystemMetrics();
 window.setInterval(() => {

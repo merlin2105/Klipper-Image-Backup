@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import image_stream, services, updates
+from . import image_stream, nas, services, updates
 
 APP_DIR = Path(__file__).parent
 AUTH_SOCKET = "/run/kibm-auth/auth.sock"
@@ -28,6 +28,9 @@ login_lock = threading.Lock()
 # the single USB job of the media worker.
 usb_jobs: dict[str, dict[str, str]] = {}
 MAX_USB_JOBS = 20
+# Worst case in the worker: 10 s waiting for another NAS action, 15 s mounting,
+# the action itself and up to 45 s unmounting a vanished NAS.
+NAS_TIMEOUT_SECONDS = 120
 try:
     VERSION = metadata.version("klipper-image-backup-manager")
 except metadata.PackageNotFoundError:
@@ -64,6 +67,30 @@ class UsbImageDeleteRequest(BaseModel):
 
 
 class UpdateRequest(BaseModel):
+    confirmed: bool
+
+
+class NasConnectionRequest(BaseModel):
+    # An empty server means: use the saved connection.
+    server: str = Field(default="", max_length=300)
+    share: str = Field(default="", max_length=300)
+    username: str = Field(default="", max_length=300)
+    password: str = Field(default="", max_length=256)
+    folder: str = Field(default="", max_length=1024)
+
+
+class NasBrowseRequest(NasConnectionRequest):
+    path: str = Field(default="", max_length=1024)
+
+
+class NasMkdirRequest(NasBrowseRequest):
+    name: str = Field(default="", max_length=80)
+
+
+class NasStartRequest(BaseModel):
+    shrink: bool = False
+    keep_full: bool = False
+    verify_image: bool = True
     confirmed: bool
 
 
@@ -127,9 +154,9 @@ def _authenticate_pi_password(password: str) -> bool:
     return result.get("authenticated") is True
 
 
-def _media_request(payload: dict) -> dict:
+def _media_request(payload: dict, timeout: float = 15) -> dict:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as media_socket:
-        media_socket.settimeout(15)
+        media_socket.settimeout(timeout)
         media_socket.connect(MEDIA_SOCKET)
         media_socket.sendall(json.dumps(payload).encode("utf-8") + b"\n")
         with media_socket.makefile("rb") as stream:
@@ -529,3 +556,123 @@ async def get_recovery_status():
         "boot_prototype_tested": False,
         "message": "Recovery-System ist noch nicht verfügbar.",
     }
+
+
+def _nas_connection(body: NasConnectionRequest, *, listing: bool = False) -> dict:
+    """Check the form fields before they reach the root worker; the worker checks again."""
+    try:
+        if body.server:
+            nas.validate_config(body.server, body.share or ("IPC$" if listing else ""), body.username, body.folder)
+        nas.validate_password(body.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"server": body.server, "share": body.share, "username": body.username,
+            "password": body.password, "folder": body.folder}
+
+
+NAS_TIMEOUT_DETAIL = "Das NAS hat zu lange nicht geantwortet. Prüfe den Status mit „Erneut prüfen“."
+
+
+def _nas_worker(payload: dict) -> dict:
+    try:
+        return _media_request(payload, timeout=NAS_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=409, detail=NAS_TIMEOUT_DETAIL) from exc
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc) or "Das NAS ist nicht erreichbar.") from exc
+
+
+@app.get("/api/backup/nas")
+def nas_settings(request: Request):
+    try:
+        _session(request)
+    except HTTPException:
+        authenticated = False
+    else:
+        authenticated = True
+    try:
+        settings = _media_request({"action": "nas_get"})
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="NAS-Einstellungen sind nicht verfügbar.") from exc
+    # Without a session nothing about the NAS is shown, not even its address.
+    return settings if authenticated else {"configured": bool(settings.get("configured"))}
+
+
+@app.post("/api/backup/nas/discover")
+def nas_discover(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    return _nas_worker({"action": "nas_discover"})
+
+
+@app.post("/api/backup/nas/shares")
+def nas_shares(body: NasConnectionRequest, request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    return _nas_worker({"action": "nas_shares", **_nas_connection(body, listing=True)})
+
+
+@app.post("/api/backup/nas/check")
+def nas_check(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    try:
+        return _media_request({"action": "nas_check"}, timeout=NAS_TIMEOUT_SECONDS)
+    except TimeoutError:
+        return {"ok": False, "error": NAS_TIMEOUT_DETAIL}
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        return {"ok": False, "error": str(exc) or "Das NAS ist nicht erreichbar."}
+
+
+@app.post("/api/backup/nas/browse")
+def nas_browse(body: NasBrowseRequest, request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    connection = _nas_connection(body)
+    try:
+        path = nas.validate_folder(body.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _nas_worker({"action": "nas_browse", **connection, "path": path})
+
+
+@app.post("/api/backup/nas/mkdir")
+def nas_mkdir(body: NasMkdirRequest, request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    connection = _nas_connection(body)
+    try:
+        path, name = nas.validate_folder(body.path), nas.validate_segment(body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _nas_worker({"action": "nas_mkdir", **connection, "path": path, "name": name})
+
+
+@app.post("/api/backup/nas/save")
+def nas_save(body: NasConnectionRequest, request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    if not body.server:
+        raise HTTPException(status_code=400, detail="Bitte IP-Adresse oder Name des NAS angeben.")
+    return _nas_worker({"action": "nas_save", **_nas_connection(body)})
+
+
+@app.post("/api/backup/nas/delete")
+def nas_delete(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    return _nas_worker({"action": "nas_delete"})
+
+
+@app.post("/api/backup/nas/images")
+def nas_images(request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    _require_csrf(request, x_kibm_csrf)
+    return _nas_worker({"action": "nas_images"})
+
+
+@app.post("/api/backup/nas/start")
+def start_nas_backup(body: NasStartRequest, request: Request, x_kibm_csrf: Optional[str] = Header(default=None)):
+    session_id, _ = _require_csrf(request, x_kibm_csrf)
+    if not body.confirmed:
+        raise HTTPException(status_code=400, detail="Bestätige zuerst den sicheren Druckerstatus.")
+    _ensure_update_idle()
+    preflight = services.backup_preflight()
+    if not preflight["backup_available"]:
+        raise HTTPException(status_code=409, detail=" ".join(preflight["blockers"]))
+    return _start_media_job(session_id, {
+        "action": "nas_start", "shrink": body.shrink, "keep_full": body.keep_full,
+        "verify_image": body.verify_image, "confirmed": body.confirmed,
+    })

@@ -85,11 +85,24 @@ Die Option **Image nach der vollständigen Sicherung mit PiShrink verkleinern** 
 
 Nach Abschluss kann die Datei über den Browser heruntergeladen werden. Nutze anschließend **USB-Stick sicher auswerfen**, bevor du den Datenträger abziehst.
 
-### 3. Ein vorhandenes USB-Image prüfen, verkleinern oder löschen
+### 3. Vollständiges Image auf einem NAS sichern (SMB)
 
-Wenn KIBM auf einem erkannten USB-Datenträger `.img`-Dateien findet, erscheint **Image auf USB-Stick**. Für die Prüfung zählt der tatsächliche Inhalt des Images, nicht sein Dateiname. KIBM liest Partitions- und Dateisysteminformationen und zeigt gefundene Images als auswählbare Kacheln.
+Für Drucker, an deren eingebautem Pi kein USB-Stick erreichbar ist, kann KIBM das Image direkt in einen Ordner auf einer Windows- oder NAS-Freigabe (SMB, z. B. Synology, TrueNAS) schreiben.
 
-- **Verkleinern:** Nur wenn sich das Dateisystem sicher prüfen lässt und mindestens 256 MB geschätzter Shrink-Spielraum vorhanden sind, bietet KIBM PiShrink an. Es erstellt eine neue Kopie auf demselben USB-Datenträger und behält das Original.
+1. Wähle **NAS (SMB) · Sicherung** und melde dich mit dem Pi-Konto an.
+2. **NAS im Netzwerk suchen** listet gefundene Geräte zum Anklicken, alternativ IP-Adresse oder Name von Hand eintragen. Eine kopierte Adresse wie `\\192.168.1.100\Backup` wird automatisch aufgeteilt.
+3. Benutzer und Passwort eingeben. **Freigaben anzeigen** listet die Freigaben des NAS. Der Freigabename muss exakt stimmen, auch in Groß-/Kleinschreibung.
+4. **Verbinden**, Sicherungsordner wählen oder anlegen, **Diesen Ordner verwenden**.
+
+Danach prüft KIBM beim Anklicken der NAS-Karte die Verbindung und zeigt **✓ Verbindung OK** mit freiem Platz oder einen roten Grund. Die Optionen (PiShrink, Voll-Image behalten, Prüfen) und der Ablauf (Journal abschließen, Kopie, Prüfen, `e2fsck`, Shrink) entsprechen der USB-Sicherung; auf dem NAS wird nichts formatiert. **Zugangsdaten ändern** und **Verbindung entfernen** stehen unter der Statuszeile; ein leeres Passwortfeld behält das gespeicherte Passwort nur, solange NAS, Freigabe und Benutzer gleich bleiben.
+
+KIBM bindet die Freigabe nur für die Dauer einer Aktion im abgeschotteten Medien-Dienst ein und ändert `/etc/fstab` nicht; ein ausgeschaltetes NAS verzögert also keinen Systemstart. Verbinde den Pi für NAS-Sicherungen möglichst per Netzwerkkabel: Im Test schrieb ein Pi 4 über Kabel 78 MB/s auf das NAS, über WLAN nur 4,6 MB/s.
+
+### 4. Ein vorhandenes Image prüfen, verkleinern oder löschen
+
+Wenn KIBM auf einem erkannten USB-Datenträger oder im NAS-Sicherungsordner `.img`-Dateien findet, erscheint **Vorhandene Images**. NAS-Images werden nur mit Anmeldung und nur beim Laden der Seite, nach einer NAS-Sicherung oder über **NAS-Images neu laden** abgefragt, damit das NAS schlafen kann. Für die Prüfung zählt der tatsächliche Inhalt des Images, nicht sein Dateiname. KIBM liest Partitions- und Dateisysteminformationen und zeigt gefundene Images als auswählbare Kacheln.
+
+- **Verkleinern:** Nur wenn sich das Dateisystem sicher prüfen lässt und mindestens 256 MB geschätzter Shrink-Spielraum vorhanden sind, bietet KIBM PiShrink an. Es erstellt eine neue Kopie am selben Speicherort und behält das Original.
 - **Bereits kompakt oder nicht sicher prüfbar:** KIBM bietet keinen weiteren Shrink an.
 - **Löschen:** Entfernt ausschließlich die ausgewählte `.img`-Datei. Ein eigenes Bestätigungsfenster und gegebenenfalls die Pi-Konto-Anmeldung sind erforderlich. Das Löschen kann nicht rückgängig gemacht werden.
 
@@ -109,6 +122,7 @@ Vor einem Update sichert der Installer die zuletzt installierte KIBM-Version ein
 - **Laufender Pi:** KIBM nimmt das Image auf, während der Pi eingeschaltet bleibt. Dateien oder Systemzustände können sich während des Lesens ändern; ein erfolgreiches Image ist keine Garantie für eine konsistente Momentaufnahme oder einen erfolgreichen Wiederherstellungsvorgang.
 - **Druckstatus:** Ein von Moonraker gemeldeter aktiver oder pausierter Druck blockiert die Sicherung. Ohne Moonraker-Verbindung gibt es keine automatische Drucküberwachung; bestätige dann nur, wenn sicher kein Druck läuft oder startet.
 - **USB-Ziel:** Nur der ausdrücklich ausgewählte Datenträger wird für die USB-Sicherung als exFAT formatiert. Diese Formatierung ist destruktiv und löscht dessen vorhandene Daten.
+- **NAS-Zugangsdaten:** Das NAS-Passwort liegt nur in `/var/lib/kibm-media/nas-credentials` (nur root lesbar) und wird nie wieder an den Browser gesendet. Die Freigabe wird nur während einer Aktion eingebunden; KIBM löscht auf dem NAS nur die ausdrücklich ausgewählte `.img`-Datei.
 - **Passwort:** KIBM prüft das bestehende Linux-Konto über PAM. Es speichert oder ändert das Passwort nicht. Die Weboberfläche verwendet lokales HTTPS und CSRF-geschützte Aktionen.
 - **Berechtigungen:** Der Webprozess läuft unprivilegiert. Authentifizierung und Medienoperationen laufen über getrennte lokale Dienste. Der Medien-Worker akzeptiert festgelegte Aktionen statt beliebiger Shell-Befehle.
 - **Netzwerk:** Port 8765 nicht ins öffentliche Internet weiterleiten. Verwende KIBM im vertrauenswürdigen lokalen Netzwerk.

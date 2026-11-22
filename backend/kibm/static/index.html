@@ -64,28 +64,68 @@
               <span><strong>USB-Stick · Sicherung</strong><small>Direkt am Raspberry Pi speichern</small></span>
               <span class="destination-info" tabindex="0" role="img" aria-label="Information zur USB-Sicherung" data-tooltip="Dieser Weg speichert das Karten-Image direkt auf einem am Raspberry Pi angeschlossenen USB-Stick. KIBM muss den Stick dafür formatieren; dabei werden alle vorhandenen Daten auf dem ausgewählten Stick gelöscht. Ohne erkannten Stick ist diese Auswahl deaktiviert.">i</span>
             </button>
+            <button id="destination-nas" class="destination-card" type="button" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></svg>
+              <span><strong>NAS (SMB) · Sicherung</strong><small id="destination-nas-detail">Auf Netzwerkfreigabe speichern</small></span>
+              <span class="destination-info" tabindex="0" role="img" aria-label="Information zur NAS-Sicherung" data-tooltip="KIBM speichert das Karten-Image in einem Ordner auf einer Windows- oder NAS-Freigabe (SMB). Auf dem NAS wird nichts formatiert. Die Freigabe wird nur während einer Aktion eingebunden. Für das Einrichten ist die Anmeldung mit dem Pi-Konto nötig.">i</span>
+            </button>
             <button id="destination-existing" class="destination-card" type="button" aria-pressed="false" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 8l3 3m0-3v3H8m8 5-3-3m0 3v-3h3"/></svg>
-              <span><strong>Image auf USB-Stick</strong><small>Vorhandenes Image prüfen, verkleinern oder löschen</small></span>
-              <span class="destination-info" tabindex="0" role="img" aria-label="Information zum vorhandenen USB-Image" data-tooltip="Diese Auswahl erscheint nur, wenn KIBM auf dem USB-Stick eine .img-Datei findet. KIBM untersucht den Image-Inhalt unabhängig vom Dateinamen. Ein verkleinertes Image wird als kompakt erkannt. Du kannst eine verkleinerbare Datei bearbeiten oder die ausgewählte Image-Datei nach Bestätigung löschen.">i</span>
+              <span><strong>Vorhandene Images</strong><small>Auf USB-Stick oder NAS prüfen, verkleinern oder löschen</small></span>
+              <span class="destination-info" tabindex="0" role="img" aria-label="Information zu vorhandenen Images" data-tooltip="Diese Auswahl erscheint, wenn KIBM auf dem USB-Stick oder im NAS-Sicherungsordner eine .img-Datei findet. KIBM untersucht den Image-Inhalt unabhängig vom Dateinamen. Ein verkleinertes Image wird als kompakt erkannt. Du kannst eine verkleinerbare Datei bearbeiten oder die ausgewählte Image-Datei nach Bestätigung löschen.">i</span>
             </button>
           </div>
           <p id="pc-options" class="pc-options" hidden>Der Browser speichert das vollständige Image im gewünschten Ordner. Plane Platz für die gesamte microSD ein.</p>
           <div id="usb-options" class="usb-options" hidden>
             <p id="usb-detection-detail" class="usb-detection-inline" role="status"></p>
             <div class="usb-select-row"><label for="usb-device">Erkannter USB-Stick</label><select id="usb-device"><option value="">USB-Stick auswählen</option></select><button id="refresh-usb" class="text-button" type="button">Erneut suchen</button></div>
-            <label class="option-check"><input id="shrink-image" type="checkbox"><span><b>Image nach der vollständigen Sicherung mit PiShrink verkleinern</b><small>Der Shrink läuft auf dem Pi an der Image-Datei auf dem USB-Stick.</small></span></label>
-            <label id="keep-full-row" class="option-check nested-option" hidden><input id="keep-full-image" type="checkbox"><span><b>Vollständiges Image zusätzlich behalten</b><small>Wenn nicht aktiviert, wird das Voll-Image erst nach erfolgreichem Shrink gelöscht.</small></span></label>
-            <label class="option-check"><input id="verify-image" type="checkbox" checked><span><b>Image nach Sicherung prüfen</b><small>KIBM liest das vollständige Image erneut und vergleicht seine SHA-256-Prüfsumme.</small></span></label>
             <p class="usb-format-note"><b>USB-Stick wird als exFAT formatiert.</b> Vorhandene Daten auf dem ausgewählten Stick werden gelöscht. exFAT ermöglicht die Nutzung unter Windows, macOS und Linux.</p>
           </div>
+          <div id="nas-options" class="usb-options" hidden>
+            <div id="nas-login" class="nas-section" hidden>
+              <p class="nas-note">Zum Einrichten und Prüfen des NAS mit dem bestehenden Pi-Konto anmelden.</p>
+              <div class="nas-row"><label for="nas-login-password">Bestehendes Pi-Passwort</label><input id="nas-login-password" type="password" autocomplete="current-password"><button id="nas-login-button" class="secondary-button" type="button">Anmelden</button></div>
+              <p id="nas-login-error" class="error-text" role="alert"></p>
+            </div>
+            <div id="nas-connected" class="nas-section" hidden>
+              <p id="nas-status" class="nas-status" role="status"></p>
+              <div class="nas-links"><button id="nas-recheck" class="text-button" type="button">Erneut prüfen</button><button id="nas-edit" class="text-button" type="button">Zugangsdaten ändern</button><button id="nas-remove" class="text-button" type="button">Verbindung entfernen</button></div>
+            </div>
+            <div id="nas-setup" class="nas-section" hidden>
+              <div class="nas-discover-row"><button id="nas-discover" class="secondary-button" type="button">NAS im Netzwerk suchen</button><span id="nas-discover-status" class="nas-note" role="status"></span></div>
+              <div id="nas-devices" class="nas-chips"></div>
+              <div class="nas-fields">
+                <label for="nas-server">IP-Adresse oder Name des NAS<input id="nas-server" type="text" placeholder="192.168.1.100" autocomplete="off" spellcheck="false"></label>
+                <label for="nas-share">Freigabename<input id="nas-share" type="text" placeholder="Backup" autocomplete="off" spellcheck="false"></label>
+                <label for="nas-username">Benutzer<input id="nas-username" type="text" autocomplete="off" spellcheck="false"></label>
+                <label for="nas-password">Passwort<input id="nas-password" type="password" autocomplete="new-password"></label>
+              </div>
+              <p id="nas-password-hint" class="nas-note" hidden>Passwort leer lassen = gespeichertes Passwort behalten.</p>
+              <div class="nas-actions"><button id="nas-list-shares" class="secondary-button" type="button">Freigaben anzeigen</button><button id="nas-connect" class="secondary-button" type="button">Verbinden</button><button id="nas-cancel-edit" class="text-button" type="button" hidden>Abbrechen</button></div>
+              <div id="nas-shares" class="nas-chips"></div>
+              <div id="nas-browser" class="nas-browser" hidden>
+                <p class="existing-images-label">Sicherungsordner wählen</p>
+                <div id="nas-breadcrumb" class="nas-breadcrumb"></div>
+                <div id="nas-folders" class="nas-chips"></div>
+                <div class="nas-row"><label for="nas-new-folder">Neuer Ordner</label><input id="nas-new-folder" type="text" maxlength="80" autocomplete="off"><button id="nas-mkdir" class="secondary-button" type="button">Ordner anlegen</button></div>
+                <button id="nas-save" class="primary-button" type="button">Diesen Ordner verwenden</button>
+              </div>
+              <p id="nas-setup-error" class="error-text" role="alert"></p>
+            </div>
+            <p class="usb-format-note">Auf dem NAS wird nichts formatiert. Über WLAN dauert eine Sicherung deutlich länger als über ein Netzwerkkabel.</p>
+          </div>
+          <div id="image-options" class="usb-options" hidden>
+            <label class="option-check"><input id="shrink-image" type="checkbox"><span><b>Image nach der vollständigen Sicherung mit PiShrink verkleinern</b><small>Der Shrink läuft auf dem Pi an der gespeicherten Image-Datei.</small></span></label>
+            <label id="keep-full-row" class="option-check nested-option" hidden><input id="keep-full-image" type="checkbox"><span><b>Vollständiges Image zusätzlich behalten</b><small>Wenn nicht aktiviert, wird das Voll-Image erst nach erfolgreichem Shrink gelöscht.</small></span></label>
+            <label class="option-check"><input id="verify-image" type="checkbox" checked><span><b>Image nach Sicherung prüfen</b><small>KIBM liest das vollständige Image erneut und vergleicht seine SHA-256-Prüfsumme.</small></span></label>
+          </div>
           <div id="existing-options" class="usb-options" hidden>
-            <p id="existing-images-label" class="existing-images-label">Gefundene Images auf dem USB-Stick</p>
+            <p id="existing-images-label" class="existing-images-label">Gefundene Images</p>
             <div id="existing-image-choices" class="existing-image-choices" role="group" aria-labelledby="existing-images-label"></div>
             <select id="existing-image" class="visually-hidden" tabindex="-1" aria-hidden="true"><option value="">Image auswählen</option></select>
             <p id="existing-image-analysis" class="usb-format-note">KIBM prüft Dateisystem und Partitionsgrößen unabhängig vom Dateinamen.</p>
-            <p class="usb-format-note">PiShrink erstellt eine verkleinerte Kopie auf demselben Stick. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.</p>
-            <div class="existing-image-actions"><button id="delete-existing-image" class="secondary-button destructive-button" type="button">Ausgewähltes Image löschen</button><span>Nur die ausgewählte .img-Datei wird gelöscht.</span></div>
+            <p class="usb-format-note">PiShrink erstellt eine verkleinerte Kopie am selben Speicherort. Dafür muss Platz für eine vollständige Arbeitskopie frei sein.</p>
+            <div class="existing-image-actions"><button id="delete-existing-image" class="secondary-button destructive-button" type="button">Ausgewähltes Image löschen</button><span>Nur die ausgewählte .img-Datei wird gelöscht.</span><button id="reload-nas-images" class="text-button" type="button" hidden>NAS-Images neu laden</button></div>
           </div>
           <div id="backup-confirmations" class="backup-confirmations" hidden>
             <label class="confirm-row"><input id="backup-confirm" type="checkbox"><span>Ich bestätige, dass kein Druck läuft und während der Sicherung keiner startet. Ohne erreichbaren Moonraker-Status erfolgt keine automatische Druckprüfung.</span></label>

@@ -147,6 +147,7 @@ if [[ -d $rollback_venv && -f $install_dir/build-info.json ]]; then
     etc/systemd/system/kibm-media.service
     etc/systemd/system/kibm-update.service
     etc/modules-load.d/kibm-loop.conf
+    etc/modules-load.d/kibm-cifs.conf
     etc/klipper-image-backup-manager.env
     usr/local/sbin/kibm-admin
     usr/local/sbin/kibm-fetch-release
@@ -203,7 +204,7 @@ restore_previous_install() {
 
 install_step="Systempakete installieren"
 missing_packages=()
-for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux mount udev kmod curl git openssh-client; do
+for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux mount udev kmod curl git openssh-client cifs-utils smbclient avahi-utils; do
   if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -q 'install ok installed'; then
     missing_packages+=("${package}")
   fi
@@ -215,6 +216,10 @@ fi
 if ! modprobe loop; then
   echo "Das Kernel-Loop-Gerät für PiShrink konnte nicht geladen werden." >&2
   exit 1
+fi
+# The media worker may not load kernel modules itself (ProtectKernelModules).
+if ! modprobe cifs; then
+  echo "Hinweis: Das SMB-Modul (cifs) konnte nicht geladen werden. Die NAS-Sicherung ist erst nach einem Neustart verfügbar." >&2
 fi
 python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
@@ -323,6 +328,7 @@ mv -Tf "$install_dir/venv.current" "$install_dir/venv"
 staged_venv=
 install -d -m 0755 /etc/modules-load.d
 printf 'loop\n' > /etc/modules-load.d/kibm-loop.conf
+printf 'cifs\n' > /etc/modules-load.d/kibm-cifs.conf
 install -d -m 0755 /opt/klipper-image-backup-manager/backend
 cp -R --no-preserve=ownership backend/kibm "$install_dir/backend/"
 chown -R root:root "$install_dir/backend"

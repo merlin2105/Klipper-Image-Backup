@@ -26,6 +26,10 @@ flowchart LR
 4. **Recovery environment** — the plan-only `kibm-recovery` CLI validates an externally built initramfs and emits a candidate `tryboot.txt` bundle outside the boot directory. It does not build the initramfs, install files, or activate a reboot. Recovery is not implemented.
 5. **Image destinations** — PC mode streams the full uncompressed card image directly to the browser and never shrinks it. USB mode always stages the full image on an explicitly selected exFAT-formatted USB drive. Optional PiShrink operates on a second staged image file; only after validation may KIBM delete the full staging image when the user did not choose to retain it. The browser may download either completed USB image.
 
+### NAS (SMB) destination
+
+NAS mode writes the same full image as USB mode into a folder on an SMB share instead of a formatted stick. The media worker mounts the saved share at `/run/kibm-media/nas` only for the duration of one action (check, browse, list images, backup, shrink, delete) and unmounts it in a `finally` block, falling back to a lazy unmount when the NAS vanished. The capture pipeline (`_capture_image`) takes the target directory as a parameter, so journal flush, copy, SHA-256 verification, `e2fsck` repair through a loop device and PiShrink run unchanged on the file on the share. NAS and USB jobs share the single worker job slot. NAS images are listed only on user action, never in the periodic USB scan.
+
 ### Pi 4 boot strategy
 
 The Pi 4 uses an EEPROM second-stage bootloader. Raspberry Pi's documented `tryboot` mechanism sets a one-shot flag and loads `tryboot.txt` instead of `config.txt`; the flag is cleared before the alternate firmware starts. The next reset therefore selects the usual `config.txt` again. The candidate bundle preserves normal configuration and places a separate recovery command line and initramfs selection in `tryboot.txt`.

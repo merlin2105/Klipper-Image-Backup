@@ -18,21 +18,35 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 try:
-    from . import partitions
-except ImportError:  # started as a script by systemd: load the sibling module explicitly
+    from . import nas, partitions
+except ImportError:  # started as a script by systemd: load the sibling modules explicitly
     import importlib.util
 
-    _spec = importlib.util.spec_from_file_location("kibm_partitions", Path(__file__).with_name("partitions.py"))
-    partitions = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(partitions)
+    def _sibling(name: str) -> Any:
+        spec = importlib.util.spec_from_file_location(f"kibm_{name}", Path(__file__).with_name(f"{name}.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
 
+    partitions = _sibling("partitions")
+    nas = _sibling("nas")
+
+RUN_DIR = Path("/run/kibm-media")
 SOCKET_PATH = Path("/run/kibm-media/worker.sock")
+NAS_MOUNT_PATH = RUN_DIR / "nas"
+NAS_STATE_DIR = Path("/var/lib/kibm-media")
+NAS_CONFIG_PATH = NAS_STATE_DIR / "nas.json"
+NAS_CREDENTIALS_PATH = NAS_STATE_DIR / "nas-credentials"
+NAS_LOCK_WAIT_SECONDS = 10
+MOUNTINFO_PATH = Path("/proc/self/mountinfo")
 VOLUME_PATH = Path("/run/kibm-media/volume")
 SCAN_PATH = Path("/run/kibm-media/scan")
 # Root-owned; read by `kibm-admin update-run` so the update installs exactly the
@@ -75,6 +89,7 @@ class MediaJob:
     error: Optional[str] = None
     files: list[dict[str, Any]] = field(default_factory=list)
     active_downloads: int = 0
+    target: str = "usb"
 
 
 _lock = threading.RLock()
@@ -90,6 +105,8 @@ _worker_uid: Optional[int] = None
 _worker_gid: Optional[int] = None
 _listed_images: dict[str, dict[str, Any]] = {}
 _image_classification_cache: dict[tuple[str, int, int], dict[str, Any]] = {}
+# Serialises everything that mounts or unmounts NAS_MOUNT_PATH.
+_nas_lock = threading.Lock()
 
 
 def _run(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -364,6 +381,7 @@ def _existing_images(volumes: Optional[list[dict[str, Any]]] = None) -> list[dic
                             "id": _image_id(volume, path, info), "filename": path.name,
                             "size_bytes": info.st_size, "device": volume["device"]["path"],
                             "partition": volume["path"], "shrinkability": shrinkability, "volume": volume,
+                            "location": "usb",
                         })
                     if len(images) >= 100:
                         return images
@@ -478,7 +496,7 @@ def _copy_for_shrink(source: Path, target: Path) -> None:
 
 
 def _shrink_image(job: MediaJob, full_path: Path, final_path: Path) -> dict[str, Any]:
-    working_path = VOLUME_PATH / f".{job.job_id}.img.part"
+    working_path = full_path.parent / f".{job.job_id}.img.part"
     _set_job(
         state="schrumpfen", phase="kopie", shrink_total_bytes=job.image_size,
         message="Arbeitskopie für PiShrink wird erstellt.",
@@ -507,7 +525,58 @@ def _shrink_image(job: MediaJob, full_path: Path, final_path: Path) -> dict[str,
     return {"filename": final_path.name, "size_bytes": final_size, "sha256": final_hash, "kind": "geshrinkt"}
 
 
+def _nas_identity(config: Any) -> list[str]:
+    return ["nas", config.server, config.share, config.folder]
+
+
+def _saved_nas_for(image: dict[str, Any]) -> Any:
+    config = nas.load_config(NAS_CONFIG_PATH)
+    if config is None or _nas_identity(config) != image["volume"]["identity"]:
+        raise ValueError("Die NAS-Verbindung wurde geändert. Lade die Liste neu.")
+    return config
+
+
+def _listed_source(directory: Path, image: dict[str, Any]) -> Path:
+    source = directory / image["filename"]
+    info = source.lstat()
+    if not stat.S_ISREG(info.st_mode) or _image_id(image["volume"], source, info) != image["id"]:
+        raise ValueError("Die Image-Datei wurde seit der Auswahl verändert. Wähle sie erneut aus.")
+    return source
+
+
+def _shrink_listed_image(job: MediaJob, image: dict[str, Any], directory: Path) -> dict[str, Any]:
+    source = _listed_source(directory, image)
+    info = source.lstat()
+    shrinkability = _classify_image(source, info.st_size, info.st_mtime_ns, use_cache=False)
+    if shrinkability["status"] != "shrinkable":
+        raise ValueError("Das Image ist bereits kompakt oder sein Dateisystem lässt sich nicht sicher prüfen.")
+    filesystem = os.statvfs(directory)
+    if filesystem.f_bavail * filesystem.f_frsize < job.image_size:
+        where = "dem NAS" if job.target == "nas" else "dem Stick"
+        raise ValueError(f"Auf {where} fehlt freier Speicherplatz für eine vollständige Arbeitskopie.")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", source.stem).strip(".-")[:100] or "image"
+    return _shrink_image(job, source, directory / f"{base}-{job.job_id}-geshrinkt.img")
+
+
+def _run_existing_nas_shrink(job: MediaJob, image: dict[str, Any]) -> None:
+    try:
+        if _printer_active():
+            raise ValueError("Moonraker meldet einen aktiven Druckauftrag.")
+        config = _saved_nas_for(image)
+        with _nas_lock, _nas_mounted(config, NAS_CREDENTIALS_PATH) as root:
+            result = _shrink_listed_image(job, image, nas.safe_subpath(root, config.folder))
+            _set_job(state="bereit", phase="fertig", message="Verkleinerte Kopie ist auf dem NAS gespeichert.", files=[result])
+    except Exception as exc:
+        with _lock:
+            finished = job.state == "bereit"
+        if not finished:
+            _set_job(state="fehler", phase="fehler", message="NAS-Image konnte nicht verkleinert werden.", error=str(exc))
+
+
 def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
+    if image["volume"].get("kind") == "nas":
+        _run_existing_nas_shrink(job, image)
+        return
     try:
         if _printer_active():
             raise ValueError("Moonraker meldet einen aktiven Druckauftrag.")
@@ -521,28 +590,35 @@ def _run_existing_shrink(job: MediaJob, image: dict[str, Any]) -> None:
             _mount_image_volume(volume, VOLUME_PATH, "rw")
         if not any(item["identity"] == expected for item in _image_volumes()):
             raise ValueError("Der USB-Stick wurde beim Einbinden gewechselt.")
-        source = VOLUME_PATH / image["filename"]
-        info = source.lstat()
-        if not stat.S_ISREG(info.st_mode) or _image_id(volume, source, info) != image["id"]:
-            raise ValueError("Die Image-Datei wurde seit der Auswahl verändert. Wähle sie erneut aus.")
-        shrinkability = _classify_image(source, info.st_size, info.st_mtime_ns, use_cache=False)
-        if shrinkability["status"] != "shrinkable":
-            raise ValueError("Das Image ist bereits kompakt oder sein Dateisystem lässt sich nicht sicher prüfen.")
-        filesystem = os.statvfs(VOLUME_PATH)
-        if filesystem.f_bavail * filesystem.f_frsize < job.image_size:
-            raise ValueError("Auf dem Stick fehlt freier Speicherplatz für eine vollständige Arbeitskopie.")
-        base = re.sub(r"[^A-Za-z0-9._-]+", "-", source.stem).strip(".-")[:100] or "usb-image"
-        final_path = VOLUME_PATH / f"{base}-{job.job_id}-geshrinkt.img"
-        result = _shrink_image(job, source, final_path)
+        result = _shrink_listed_image(job, image, VOLUME_PATH)
         _set_job(state="bereit", phase="fertig", message="Verkleinerte Kopie ist auf USB gespeichert.", files=[result])
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         _set_job(state="fehler", phase="fehler", message="USB-Image konnte nicht verkleinert werden.", error=str(exc))
 
 
+TARGET_TEXT = {
+    "usb": {
+        "writing": "Vollständiges Karten-Image wird auf den USB-Stick geschrieben.",
+        "verifying": "Geschriebenes Image wird vom USB-Stick zurückgelesen und geprüft.",
+        "verify_failed": "Der SHA-256-Vergleich der geschriebenen USB-Image-Datei ist fehlgeschlagen.",
+        "done": "Image ist auf dem USB-Stick gespeichert und kann heruntergeladen werden.",
+        "failed": "USB-Image konnte nicht sicher erstellt werden.",
+    },
+    "nas": {
+        "writing": "Vollständiges Karten-Image wird auf das NAS geschrieben.",
+        "verifying": "Geschriebenes Image wird vom NAS zurückgelesen und geprüft.",
+        "verify_failed": "Der SHA-256-Vergleich der geschriebenen NAS-Image-Datei ist fehlgeschlagen.",
+        "done": "Image ist auf dem NAS gespeichert.",
+        "failed": "NAS-Image konnte nicht sicher erstellt werden.",
+    },
+}
+
+
+def _fail_job(job: MediaJob, exc: BaseException) -> None:
+    _set_job(state="fehler", phase="fehler", message=TARGET_TEXT[job.target]["failed"], error=str(exc), files=[])
+
+
 def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
-    full_path: Optional[Path] = None
-    part_path: Optional[Path] = None
-    full_image_ready = False
     try:
         if _printer_active():
             raise ValueError("Moonraker meldet einen aktiven Druck. Es wurde noch nichts formatiert.")
@@ -562,15 +638,52 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
             raise ValueError("Nach dem Formatieren steht nicht genug freier Platz für den sicheren Image-Ablauf zur Verfügung.")
         if _printer_active():
             raise ValueError("Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.")
+    except Exception as exc:
+        _fail_job(job, exc)
+        return
+    _capture_image(job, VOLUME_PATH, hostname)
 
+
+def _run_nas_job(job: MediaJob, config: Any, hostname: str) -> None:
+    try:
+        with _nas_lock, _nas_mounted(config, NAS_CREDENTIALS_PATH) as root:
+            directory = _nas_folder(root, config.folder)
+            filesystem = os.statvfs(directory)
+            required = _usb_image_bytes(job.image_size, job.shrink)
+            if filesystem.f_bavail * filesystem.f_frsize < required:
+                raise ValueError(
+                    f"Auf dem NAS ist nicht genug freier Platz. Diese Auswahl benötigt rund {required / 1024**3:.2f} GiB."
+                )
+            if _disk_size(SOURCE_DEVICE) != job.device_size:
+                raise ValueError("Die Größe der System-microSD hat sich geändert.")
+            if _printer_active():
+                raise ValueError("Moonraker meldet einen aktiven Druck. Die Sicherung wurde nicht gestartet.")
+            _capture_image(job, directory, hostname)
+    except Exception as exc:
+        # _capture_image reports its own result; only failures around it (mounting,
+        # folder, space, unmounting before the image was finished) end up here.
+        with _lock:
+            finished = job.state in {"bereit", "fehler"}
+        if finished:
+            logger.warning("NAS job %s: %s", job.job_id, exc)
+        else:
+            _fail_job(job, exc)
+
+
+def _capture_image(job: MediaJob, directory: Path, hostname: str) -> None:
+    text = TARGET_TEXT[job.target]
+    full_path: Optional[Path] = None
+    part_path: Optional[Path] = None
+    full_image_ready = False
+    try:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         safe_hostname = re.sub(r"[^A-Za-z0-9._-]+", "-", hostname).strip(".-") or "klipper"
         base = f"{safe_hostname}-{stamp}-sdkarte"
-        full_path = VOLUME_PATH / (f"{base}-voll.img" if job.shrink else f"{base}.img")
+        full_path = directory / (f"{base}-voll.img" if job.shrink else f"{base}.img")
         # Hidden until complete and repaired: an aborted job, a pulled stick or a
         # power loss never leaves a file that looks like a usable image.
-        part_path = VOLUME_PATH / f".{full_path.name}.part"
-        _set_job(state="sichern", phase="sichern", message="Vollständiges Karten-Image wird auf den USB-Stick geschrieben.", sent_bytes=0)
+        part_path = directory / f".{full_path.name}.part"
+        _set_job(state="sichern", phase="sichern", message=text["writing"], sent_bytes=0)
         digest = hashlib.sha256()
         next_printer_check = time.monotonic()
         # Write pending data of the running system to the card before reading it.
@@ -603,9 +716,9 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         finally:
             os.close(source_fd)
         if job.verify_image:
-            _set_job(state="verifizieren", phase="verifizieren", message="Geschriebenes Image wird vom USB-Stick zurückgelesen und geprüft.")
+            _set_job(state="verifizieren", phase="verifizieren", message=text["verifying"])
             if _hash_file(part_path, lambda count: _set_job(verified_bytes=count)) != digest.hexdigest():
-                raise OSError("Der SHA-256-Vergleich der geschriebenen USB-Image-Datei ist fehlgeschlagen.")
+                raise OSError(text["verify_failed"])
 
         _set_job(
             state="reparieren", phase="dateisystem", verified_bytes=0,
@@ -623,7 +736,7 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
         full_image_ready = True
 
         if job.shrink:
-            final_path = VOLUME_PATH / f"{base}-geshrinkt.img"
+            final_path = directory / f"{base}-geshrinkt.img"
             files = [_shrink_image(job, full_path, final_path)]
             if job.keep_full:
                 files.insert(0, {"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": final_hash, "kind": "vollständig"})
@@ -631,20 +744,20 @@ def _run_job(job: MediaJob, device: dict[str, Any], hostname: str) -> None:
                 full_path.unlink()
         else:
             files = [{"filename": full_path.name, "size_bytes": full_path.stat().st_size, "sha256": final_hash, "kind": "vollständig"}]
-        _set_job(state="bereit", phase="fertig", message="Image ist auf dem USB-Stick gespeichert und kann heruntergeladen werden.", files=files)
+        _set_job(state="bereit", phase="fertig", message=text["done"], files=files)
     except Exception as exc:
         if part_path is not None:
-            part_path.unlink(missing_ok=True)
+            try:
+                part_path.unlink(missing_ok=True)
+            except OSError as cleanup:
+                logger.warning("Could not remove %s: %s", part_path, cleanup)
         files = []
         if full_image_ready and full_path and full_path.is_file() and full_path.stat().st_size == job.image_size:
             files.append({
                 "filename": full_path.name, "size_bytes": full_path.stat().st_size,
                 "sha256": job.sha256, "kind": "vollständig",
             })
-        _set_job(
-            state="fehler", phase="fehler", message="USB-Image konnte nicht sicher erstellt werden.",
-            error=str(exc), files=files,
-        )
+        _set_job(state="fehler", phase="fehler", message=text["failed"], error=str(exc), files=files)
 
 
 def _job_data(job: MediaJob) -> dict[str, Any]:
@@ -654,7 +767,176 @@ def _job_data(job: MediaJob) -> dict[str, Any]:
         "shrink_bytes": job.shrink_bytes, "shrink_total_bytes": job.shrink_total_bytes,
         "sha256": job.sha256, "error": job.error, "files": job.files,
         "shrink": job.shrink, "keep_full": job.keep_full, "verify_image": job.verify_image,
+        "target": job.target,
     }
+
+
+def _replace_listed(kind: str, images: list[dict[str, Any]]) -> None:
+    """Replace the selectable images of one location; caller holds _lock."""
+    for image_id in [key for key, item in _listed_images.items() if item["volume"].get("kind", "usb") == kind]:
+        del _listed_images[image_id]
+    _listed_images.update((item["id"], {**item, "volume": {**item["volume"], "kind": kind}}) for item in images)
+
+
+def _is_mounted(path: Path) -> bool:
+    # Read the mount table instead of stat-ing the mount point: on a CIFS mount whose
+    # NAS vanished, os.path.ismount() fails and would report "not mounted".
+    target = str(path)
+    try:
+        with MOUNTINFO_PATH.open(encoding="utf-8") as mountinfo:
+            return any(len(fields) > 4 and fields[4] == target for fields in map(str.split, mountinfo))
+    except OSError:
+        return os.path.ismount(target)
+
+
+def _nas_unmount() -> None:
+    if not _is_mounted(NAS_MOUNT_PATH):
+        return
+    try:
+        _run(["umount", "--", str(NAS_MOUNT_PATH)], timeout=30)
+    except subprocess.SubprocessError:
+        # A vanished NAS can block a normal unmount; detach it so the next action can mount again.
+        _run(["umount", "--lazy", "--", str(NAS_MOUNT_PATH)], timeout=15)
+
+
+@contextmanager
+def _nas_mounted(config: Any, credentials: Path) -> Iterator[Path]:
+    """Mount the share only for one action, in the worker's own mount namespace."""
+    NAS_MOUNT_PATH.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if _is_mounted(NAS_MOUNT_PATH):
+        # Callers hold _nas_lock, so a mount found here is left over from an earlier
+        # action whose unmount failed (e.g. the NAS was switched off).
+        _nas_unmount()
+        if _is_mounted(NAS_MOUNT_PATH):
+            raise ValueError("Der NAS-Einhängepunkt ist bereits belegt.")
+    try:
+        _run(nas.mount_args(config, credentials, NAS_MOUNT_PATH), timeout=nas.MOUNT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _nas_unmount()
+        raise ValueError(nas.mount_error("", timed_out=True)) from None
+    except subprocess.CalledProcessError as exc:
+        # Translate here: the generic handler would append raw mount output.
+        raise ValueError(nas.mount_error(exc.stderr or exc.stdout or "", timed_out=False)) from None
+    try:
+        yield NAS_MOUNT_PATH
+    except BaseException:
+        # Keep the original error; an unmount failure on a dead NAS would only hide it.
+        try:
+            _nas_unmount()
+        except (OSError, subprocess.SubprocessError) as exc:
+            logger.warning("NAS unmount failed: %s", exc)
+        raise
+    _nas_unmount()
+
+
+def _request_text(request: dict[str, Any], key: str) -> str:
+    value = request.get(key, "")
+    if not isinstance(value, str):
+        raise ValueError(f"Ungültige Eingabe: {key}")
+    return value
+
+
+@contextmanager
+def _nas_credentials(request: dict[str, Any], *, listing: bool = False) -> Iterator[tuple[Any, Path]]:
+    """Config and credentials file for a request; a temporary file for unsaved passwords."""
+    saved = nas.load_config(NAS_CONFIG_PATH)
+    if not _request_text(request, "server"):
+        if saved is None:
+            raise ValueError("Keine NAS-Verbindung gespeichert.")
+        yield saved, NAS_CREDENTIALS_PATH
+        return
+    share = _request_text(request, "share") or ("IPC$" if listing else "")
+    config = nas.validate_config(
+        _request_text(request, "server"), share, _request_text(request, "username"), _request_text(request, "folder"),
+    )
+    password = nas.validate_password(_request_text(request, "password"))
+    if not password:
+        same_target = saved is not None and (config.server, config.username, config.domain) == (
+            saved.server, saved.username, saved.domain) and (listing or config.share == saved.share)
+        if not same_target:
+            # The stored password must never be sent to a different host, share or account.
+            raise ValueError("Bitte das Passwort eingeben.")
+        yield config, NAS_CREDENTIALS_PATH
+        return
+    RUN_DIR.mkdir(mode=0o750, parents=True, exist_ok=True)
+    path = RUN_DIR / f"nas-cred-{secrets.token_hex(8)}"
+    nas.write_private(path, nas.credentials_text(config, password))
+    try:
+        yield config, path
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _nas_job_busy() -> bool:
+    with _lock:
+        return bool(_job and _job.target == "nas" and _job.state in BUSY_STATES)
+
+
+@contextmanager
+def _nas_exclusive() -> Iterator[None]:
+    if _nas_job_busy():
+        raise ValueError("Während einer laufenden NAS-Sicherung ist das nicht möglich.")
+    if not _nas_lock.acquire(timeout=NAS_LOCK_WAIT_SECONDS):
+        raise ValueError("Das NAS wird gerade von einem anderen Vorgang benutzt. Versuche es gleich noch einmal.")
+    try:
+        yield
+    finally:
+        _nas_lock.release()
+
+
+@contextmanager
+def _nas_session(request: dict[str, Any]) -> Iterator[tuple[Any, Path]]:
+    with _nas_exclusive(), _nas_credentials(request) as (config, credentials), _nas_mounted(config, credentials) as root:
+        yield config, root
+
+
+def _nas_folder(root: Path, folder: str) -> Path:
+    """The backup folder on the mounted share; must exist and be writable."""
+    directory = nas.safe_subpath(root, folder)
+    if not directory.is_dir():
+        raise ValueError(f"Sicherungsordner nicht gefunden: {folder or '/'}")
+    # A fresh name with O_EXCL|O_NOFOLLOW never follows or overwrites anything on the share.
+    probe = directory / f".kibm-write-test-{secrets.token_hex(4)}"
+    try:
+        os.close(os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600))
+        probe.unlink()
+    except OSError:
+        raise ValueError("Keine Schreibrechte im Sicherungsordner.") from None
+    return directory
+
+
+def _avahi_output() -> str:
+    try:
+        return _run(["avahi-browse", "-rpt", "_smb._tcp"], timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _own_ipv4() -> str:
+    # No packet is sent; the kernel only picks the outgoing address. Works without
+    # netlink, which the worker sandbox does not allow.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.connect(("192.0.2.1", 9))
+        return probe.getsockname()[0]
+
+
+def _port_open(host: str) -> bool:
+    try:
+        with socket.create_connection((host, 445), timeout=0.4):
+            return True
+    except OSError:
+        return False
+
+
+def _reverse_name(ip: str) -> Optional[str]:
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        name = pool.submit(socket.gethostbyaddr, ip).result(timeout=1)[0]
+        return name if name != ip else None
+    except Exception:
+        return None
+    finally:
+        pool.shutdown(wait=False)
 
 
 class MediaHandler(socketserver.StreamRequestHandler):
@@ -702,6 +984,26 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 self._update_status()
             elif action == "update_start":
                 self._update_start(request)
+            elif action == "nas_start":
+                self._nas_start(request)
+            elif action == "nas_images":
+                self._nas_images(request)
+            elif action == "nas_get":
+                self._nas_get()
+            elif action == "nas_check":
+                self._nas_check(request)
+            elif action == "nas_browse":
+                self._nas_browse(request)
+            elif action == "nas_mkdir":
+                self._nas_mkdir(request)
+            elif action == "nas_save":
+                self._nas_save(request)
+            elif action == "nas_delete":
+                self._nas_delete(request)
+            elif action == "nas_shares":
+                self._nas_shares(request)
+            elif action == "nas_discover":
+                self._nas_discover()
             else:
                 self._reply({"error": "unsupported_action"})
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
@@ -732,11 +1034,39 @@ class MediaHandler(socketserver.StreamRequestHandler):
                 images = _existing_images(volumes)
                 _images_cache = (key, images)
             with _lock:
-                _listed_images.clear()
-                _listed_images.update((item["id"], item) for item in images)
+                _replace_listed("usb", images)
             self._reply({"images": [
                 {key: value for key, value in item.items() if key != "volume"} for item in images
             ]})
+
+    def _nas_images(self, request: dict[str, Any]) -> None:
+        if _nas_job_busy():
+            self._reply({"images": [], "busy": True})
+            return
+        images = []
+        with _nas_session({}) as (config, root):
+            directory = nas.safe_subpath(root, config.folder)
+            if not directory.is_dir():
+                raise ValueError(f"Sicherungsordner nicht gefunden: {config.folder or '/'}")
+            volume = {"kind": "nas", "identity": _nas_identity(config)}
+            for path in sorted(directory.iterdir(), key=lambda item: item.name.lower()):
+                if path.suffix.lower() != ".img" or path.name.startswith("."):
+                    continue
+                info = path.lstat()
+                if stat.S_ISREG(info.st_mode) and info.st_size > 0:
+                    images.append({
+                        "id": _image_id(volume, path, info), "filename": path.name, "size_bytes": info.st_size,
+                        "shrinkability": _classify_image(path, info.st_size, info.st_mtime_ns),
+                        "location": "nas", "volume": volume,
+                    })
+                if len(images) >= 100:
+                    break
+        with _lock:
+            _replace_listed("nas", images)
+        self._reply({
+            "images": [{key: value for key, value in item.items() if key != "volume"} for item in images],
+            "display": config.display(),
+        })
 
     def _start_existing(self, request: dict[str, Any]) -> None:
         global _job
@@ -750,17 +1080,40 @@ class MediaHandler(socketserver.StreamRequestHandler):
             if image.get("shrinkability", {}).get("status") != "shrinkable":
                 raise ValueError("Dieses Image ist bereits kompakt oder kann nicht sicher geprüft werden.")
             volume = image["volume"]
+            on_nas = volume.get("kind") == "nas"
             job = MediaJob(
                 job_id=secrets.token_hex(10), state="wird vorbereitet", phase="vorbereitung",
-                message="Image auf USB wird geöffnet.", image_size=image["size_bytes"],
-                source_device=volume["path"], shrink=True, keep_full=True, verify_image=False,
+                message="Image auf dem NAS wird geöffnet." if on_nas else "Image auf USB wird geöffnet.",
+                image_size=image["size_bytes"], source_device="nas" if on_nas else volume["path"],
+                shrink=True, keep_full=True, verify_image=False, target="nas" if on_nas else "usb",
             )
             _job = job
         threading.Thread(target=_run_existing_shrink, args=(job, image), daemon=True).start()
-        self._reply({"job": _job_data(job), "device": volume["device"]})
+        device = {"path": image["filename"], "model": "NAS (SMB)", "size_bytes": 0} if on_nas else volume["device"]
+        self._reply({"job": _job_data(job), "device": device})
+
+    def _delete_nas_image(self, image: dict[str, Any]) -> None:
+        filename = image["filename"]
+        config = _saved_nas_for(image)
+        with _nas_exclusive(), _nas_mounted(config, NAS_CREDENTIALS_PATH) as root:
+            directory = nas.safe_subpath(root, config.folder)
+            _listed_source(directory, image).unlink()
+        _invalidate_images()
+        with _lock:
+            _listed_images.pop(image["id"], None)
+        self._reply({"deleted": filename})
 
     def _delete_image(self, request: dict[str, Any]) -> None:
         _ensure_update_idle()
+        with _lock:
+            image = _listed_images.get(request.get("image_id"))
+        if image and image["volume"].get("kind") == "nas":
+            # Mounting a share can take seconds: do it without holding _lock, which status polls need.
+            filename = image.get("filename")
+            if not isinstance(filename, str) or Path(filename).name != filename or not filename.lower().endswith(".img"):
+                raise ValueError("Es kann nur eine einzelne .img-Datei gelöscht werden.")
+            self._delete_nas_image(image)
+            return
         with _scan_lock, _lock:
             if _job and (_job.state in BUSY_STATES or _job.active_downloads):
                 raise ValueError("Warte, bis der laufende USB-Auftrag und alle Downloads abgeschlossen sind.")
@@ -824,6 +1177,32 @@ class MediaHandler(socketserver.StreamRequestHandler):
         threading.Thread(target=_run_job, args=(job, device, socket.gethostname()), daemon=True).start()
         self._reply({"job": _job_data(job), "device": device})
 
+    def _nas_start(self, request: dict[str, Any]) -> None:
+        global _job
+        _ensure_update_idle()
+        if request.get("confirmed") is not True:
+            raise ValueError("Bestätige zuerst den sicheren Druckerstatus.")
+        config = nas.load_config(NAS_CONFIG_PATH)
+        if config is None:
+            raise ValueError("Keine NAS-Verbindung gespeichert.")
+        device_size = _disk_size(SOURCE_DEVICE)
+        if device_size <= 0:
+            raise ValueError("Größe der System-microSD nicht verfügbar.")
+        shrink = request.get("shrink") is True
+        job = MediaJob(
+            job_id=secrets.token_urlsafe(20),
+            state="wird vorbereitet", phase="vorbereitung", message="NAS-Verbindung wird geprüft.",
+            image_size=_capture_size(SOURCE_DEVICE, device_size), device_size=device_size, source_device=SOURCE_DEVICE,
+            shrink=shrink, keep_full=shrink and request.get("keep_full") is True,
+            verify_image=request.get("verify_image", True) is not False, target="nas",
+        )
+        with _scan_lock, _lock:
+            if _job and (_job.state in BUSY_STATES or _job.active_downloads):
+                raise ValueError("Es läuft bereits ein Image-Auftrag oder Download.")
+            _job = job
+        threading.Thread(target=_run_nas_job, args=(job, config, socket.gethostname()), daemon=True).start()
+        self._reply({"job": _job_data(job), "device": {"path": config.display(), "model": "NAS (SMB)", "size_bytes": 0}})
+
     def _status(self, request: dict[str, Any]) -> None:
         with _lock:
             job = _job
@@ -839,6 +1218,8 @@ class MediaHandler(socketserver.StreamRequestHandler):
         with _lock:
             job = _job
             file_info = next((item for item in job.files if item["filename"] == name), None) if job else None
+            if job and job.target == "nas":
+                raise ValueError("NAS-Images liegen bereits auf dem NAS.")
             if not job or job.state not in {"bereit", "fehler"} or not file_info:
                 raise ValueError("Image-Download ist nicht bereit.")
             if job.active_downloads:
@@ -930,6 +1311,102 @@ class MediaHandler(socketserver.StreamRequestHandler):
             UPDATE_COMMIT_PATH.unlink(missing_ok=True)
             raise
         self._reply({"state": "running"})
+
+    def _nas_get(self) -> None:
+        config = nas.load_config(NAS_CONFIG_PATH)
+        if config is None:
+            self._reply({"configured": False})
+            return
+        self._reply({
+            "configured": True, "server": config.server, "share": config.share, "username": config.user_label(),
+            "folder": config.folder, "display": config.display(),
+        })
+
+    def _nas_check(self, request: dict[str, Any]) -> None:
+        config = nas.load_config(NAS_CONFIG_PATH)
+        if config is None:
+            self._reply({"ok": False, "error": "Keine NAS-Verbindung gespeichert."})
+            return
+        if _nas_job_busy():
+            self._reply({"ok": True, "busy": True, "display": config.display()})
+            return
+        try:
+            with _nas_session({}) as (config, root):
+                filesystem = os.statvfs(_nas_folder(root, config.folder))
+        except ValueError as exc:
+            self._reply({"ok": False, "error": str(exc)})
+            return
+        self._reply({"ok": True, "display": config.display(), "free_bytes": filesystem.f_bavail * filesystem.f_frsize})
+
+    def _nas_browse(self, request: dict[str, Any]) -> None:
+        path = nas.validate_folder(_request_text(request, "path"))
+        with _nas_session(request) as (_config, root):
+            directory = nas.safe_subpath(root, path)
+            if not directory.is_dir():
+                raise ValueError(f"Ordner nicht gefunden: {path or '/'}")
+            with os.scandir(directory) as entries:
+                folders = sorted(
+                    (entry.name for entry in entries
+                     if not entry.name.startswith(".") and entry.is_dir(follow_symlinks=False)),
+                    key=str.lower,
+                )[:200]
+        self._reply({"path": path, "folders": folders})
+
+    def _nas_mkdir(self, request: dict[str, Any]) -> None:
+        path = nas.validate_folder(_request_text(request, "path"))
+        name = nas.validate_segment(_request_text(request, "name"))
+        with _nas_session(request) as (_config, root):
+            parent = nas.safe_subpath(root, path)
+            if not parent.is_dir():
+                raise ValueError(f"Ordner nicht gefunden: {path or '/'}")
+            try:
+                (parent / name).mkdir(mode=0o700)
+            except FileExistsError:
+                raise ValueError("Ein Ordner mit diesem Namen existiert bereits.") from None
+        self._reply({"path": f"{path}/{name}" if path else name})
+
+    def _nas_save(self, request: dict[str, Any]) -> None:
+        if not _request_text(request, "server"):
+            raise ValueError("Bitte IP-Adresse oder Name des NAS angeben.")
+        password = _request_text(request, "password")
+        with _nas_session(request) as (config, root):
+            _nas_folder(root, config.folder)
+            NAS_STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if password:
+                nas.write_private(NAS_CREDENTIALS_PATH, nas.credentials_text(config, password))
+            nas.save_config(NAS_CONFIG_PATH, config)
+        self._reply({"saved": True, "display": config.display()})
+
+    def _nas_delete(self, request: dict[str, Any]) -> None:
+        with _nas_exclusive():
+            NAS_CONFIG_PATH.unlink(missing_ok=True)
+            NAS_CREDENTIALS_PATH.unlink(missing_ok=True)
+        self._reply({"deleted": True})
+
+    def _nas_shares(self, request: dict[str, Any]) -> None:
+        with _nas_credentials(request, listing=True) as (config, credentials):
+            try:
+                output = _run(["smbclient", "-g", "-L", f"//{config.server}", "-A", str(credentials)], timeout=15).stdout
+            except FileNotFoundError:
+                raise ValueError("smbclient ist nicht installiert. Installiere KIBM erneut.") from None
+            except subprocess.TimeoutExpired:
+                raise ValueError(nas.mount_error("", timed_out=True)) from None
+            except subprocess.CalledProcessError as exc:
+                detail = f"{exc.stdout or ''}\n{exc.stderr or ''}"
+                if "NT_STATUS_LOGON_FAILURE" in detail or "NT_STATUS_ACCESS_DENIED" in detail:
+                    raise ValueError(nas.mount_error("error(13)", timed_out=False)) from None
+                if any(code in detail for code in ("NT_STATUS_HOST_UNREACHABLE", "NT_STATUS_IO_TIMEOUT", "NT_STATUS_CONNECTION_REFUSED")):
+                    raise ValueError(nas.mount_error("error(112)", timed_out=False)) from None
+                raise ValueError("Die Freigaben des NAS konnten nicht abgefragt werden.") from None
+        self._reply({"shares": nas.parse_shares(output)})
+
+    def _nas_discover(self) -> None:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            avahi = pool.submit(_avahi_output)
+            scanned = pool.submit(lambda: nas.scan_port_445(nas.subnet_hosts(_own_ipv4()), _port_open))
+            found = scanned.result()
+            mdns = nas.parse_avahi(avahi.result())
+        self._reply({"devices": nas.merge_discovered(mdns, found, _reverse_name)})
 
     def _reply(self, result: dict[str, Any]) -> None:
         self.wfile.write(json.dumps(result).encode("utf-8") + b"\n")

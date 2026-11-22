@@ -502,3 +502,452 @@ def test_shrink_fails_when_first_boot_expansion_is_missing(monkeypatch, tmp_path
         media_worker._shrink_image(job, full, final)
     assert not final.exists()
     assert full.exists()
+
+
+def _nas_handler(monkeypatch, tmp_path, *, mount_error=None, smb_output=""):
+    state = {"mounted": False, "calls": []}
+    share = tmp_path / "share"
+    for name in ("run", "share", "state"):
+        (tmp_path / name).mkdir(exist_ok=True)
+
+    def run(args, timeout=30):
+        state["calls"].append(list(args))
+        if args[0] == "mount":
+            if mount_error:
+                raise mount_error
+            state["mounted"] = True
+            state["credentials"] = Path(args[4].split(",")[0].split("=", 1)[1]).read_text()
+        elif args[0] == "umount":
+            state["mounted"] = False
+        elif args[0] == "smbclient":
+            state["credentials"] = Path(args[-1]).read_text()
+            return SimpleNamespace(stdout=smb_output)
+        return SimpleNamespace(stdout="")
+
+    handler, replies = _handler(monkeypatch, tmp_path, run)
+    monkeypatch.setattr(media_worker, "_is_mounted", lambda _path: state["mounted"])
+    monkeypatch.setattr(media_worker, "RUN_DIR", tmp_path / "run")
+    monkeypatch.setattr(media_worker, "NAS_MOUNT_PATH", share)
+    monkeypatch.setattr(media_worker, "NAS_STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(media_worker, "NAS_CONFIG_PATH", tmp_path / "state" / "nas.json")
+    monkeypatch.setattr(media_worker, "NAS_CREDENTIALS_PATH", tmp_path / "state" / "nas-credentials")
+    return handler, replies, state, share
+
+
+NAS_REQUEST = {"server": "h", "share": "S", "username": "u", "password": "geheim", "folder": "f"}
+
+
+def _save_nas(handler, share, **values):
+    (share / "f").mkdir(exist_ok=True)
+    handler._nas_save({**NAS_REQUEST, **values})
+
+
+def test_nas_save_stores_config_and_private_credentials(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+
+    assert replies == [{"saved": True, "display": "//h/S/f"}]
+    assert "geheim" not in (tmp_path / "state" / "nas.json").read_text()
+    credentials = tmp_path / "state" / "nas-credentials"
+    assert credentials.read_text() == "username=u\npassword=geheim\n"
+    assert credentials.stat().st_mode & 0o777 == 0o600
+    assert not any("geheim" in arg for args in state["calls"] for arg in args)
+    assert state["credentials"] == "username=u\npassword=geheim\n"
+    assert ["umount", "--", str(share)] in state["calls"]
+    assert not list((tmp_path / "run").iterdir())
+
+
+def test_nas_save_keeps_password_only_for_same_target(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    _save_nas(handler, share, password="")
+    assert replies[-1] == {"saved": True, "display": "//h/S/f"}
+    assert (tmp_path / "state" / "nas-credentials").read_text() == "username=u\npassword=geheim\n"
+
+    mounts = sum(args[0] == "mount" for args in state["calls"])
+    with pytest.raises(ValueError, match="Bitte das Passwort eingeben."):
+        handler._nas_save({**NAS_REQUEST, "server": "other", "password": ""})
+    assert sum(args[0] == "mount" for args in state["calls"]) == mounts
+
+
+def test_nas_get_without_config_reports_only_configured_false(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, _share = _nas_handler(monkeypatch, tmp_path)
+    handler._nas_get()
+    assert replies == [{"configured": False}]
+
+
+def test_nas_get_never_returns_the_password(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share, username="D\\u")
+    handler._nas_get()
+    assert replies[-1] == {"configured": True, "server": "h", "share": "S", "username": "D\\u", "folder": "f", "display": "//h/S/f"}
+
+
+def test_nas_check_reports_missing_folder(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    (share / "f").rmdir()
+    handler._nas_check({})
+    assert replies[-1] == {"ok": False, "error": "Sicherungsordner nicht gefunden: f"}
+    assert not state["mounted"]
+
+
+def test_nas_check_reports_free_space(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    handler._nas_check({})
+    assert replies[-1]["ok"] is True and replies[-1]["display"] == "//h/S/f" and replies[-1]["free_bytes"] > 0
+    assert not (share / "f" / ".kibm-write-test").exists()
+
+
+def test_nas_check_maps_mount_failure(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: (_ for _ in ()).throw(
+        subprocess.CalledProcessError(32, args, stderr="mount error(13): Permission denied")))
+    handler._nas_check({})
+    assert replies[-1] == {"ok": False, "error": (
+        "Anmeldung abgelehnt. Prüfe Benutzer, Passwort und die genaue Schreibweise des Freigabenamens (Groß-/Kleinschreibung).")}
+
+
+def test_nas_check_while_nas_job_runs_does_not_mount(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    _media_job(10, 10, target="nas").state = "sichern"
+    mounts = sum(args[0] == "mount" for args in state["calls"])
+    handler._nas_check({})
+    assert replies[-1] == {"ok": True, "busy": True, "display": "//h/S/f"}
+    assert sum(args[0] == "mount" for args in state["calls"]) == mounts
+
+
+def test_nas_browse_lists_only_real_directories(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    (share / "b").mkdir()
+    (share / "a").mkdir()
+    (share / ".versteckt").mkdir()
+    (share / "datei.img").write_bytes(b"x")
+    (share / "link").symlink_to(share / "a")
+    handler._nas_browse({**NAS_REQUEST, "path": ""})
+    assert replies == [{"path": "", "folders": ["a", "b"]}]
+    assert not state["mounted"]
+
+
+def test_nas_browse_rejects_symlink_escape(monkeypatch, tmp_path) -> None:
+    handler, _replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    (share / "out").symlink_to(tmp_path)
+    with pytest.raises(ValueError):
+        handler._nas_browse({**NAS_REQUEST, "path": "out"})
+    assert not state["mounted"]
+
+
+@pytest.mark.parametrize("name", ["a/b", "..", ""])
+def test_nas_mkdir_rejects_bad_name(monkeypatch, tmp_path, name) -> None:
+    handler, _replies, state, _share = _nas_handler(monkeypatch, tmp_path)
+    with pytest.raises(ValueError):
+        handler._nas_mkdir({**NAS_REQUEST, "path": "", "name": name})
+    assert not any(args[0] == "mount" for args in state["calls"])
+
+
+def test_nas_mkdir_creates_folder(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    (share / "klipper").mkdir()
+    handler._nas_mkdir({**NAS_REQUEST, "path": "klipper", "name": "prusa"})
+    assert replies == [{"path": "klipper/prusa"}]
+    assert (share / "klipper" / "prusa").is_dir()
+
+
+def test_nas_delete_removes_both_files(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    handler._nas_delete({})
+    assert replies[-1] == {"deleted": True}
+    assert not list((tmp_path / "state").iterdir())
+
+
+def test_nas_shares_parses_smbclient_output(monkeypatch, tmp_path) -> None:
+    handler, replies, state, _share = _nas_handler(monkeypatch, tmp_path, smb_output="Disk|Backup|\nDisk|IPC$|\n")
+    handler._nas_shares({"server": "h", "username": "u", "password": "geheim"})
+    assert replies == [{"shares": ["Backup"]}]
+    assert state["credentials"] == "username=u\npassword=geheim\n"
+    assert not list((tmp_path / "run").iterdir())
+
+
+def test_nas_shares_maps_logon_failure(monkeypatch, tmp_path) -> None:
+    handler, _replies, _state, _share = _nas_handler(monkeypatch, tmp_path)
+    monkeypatch.setattr(media_worker, "_run", lambda args, timeout=30: (_ for _ in ()).throw(
+        subprocess.CalledProcessError(1, args, output="session setup failed: NT_STATUS_LOGON_FAILURE")))
+    with pytest.raises(ValueError, match="Anmeldung abgelehnt"):
+        handler._nas_shares({"server": "h", "username": "u", "password": "falsch"})
+
+
+def test_nas_discover_merges_sources(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, _share = _nas_handler(monkeypatch, tmp_path)
+    monkeypatch.setattr(media_worker, "_avahi_output", lambda: "=;eth0;IPv4;truenas;_smb._tcp;local;truenas.local;192.168.1.242;445;\n")
+    monkeypatch.setattr(media_worker, "_own_ipv4", lambda: "192.168.1.30")
+    monkeypatch.setattr(media_worker, "_port_open", lambda host: host in {"192.168.1.242", "192.168.1.5"})
+    monkeypatch.setattr(media_worker, "_reverse_name", lambda ip: None)
+    handler._nas_discover()
+    assert replies == [{"devices": [{"name": "192.168.1.5", "address": "192.168.1.5"},
+                                    {"name": "truenas", "address": "192.168.1.242"}]}]
+
+
+def _nas_capture(monkeypatch, tmp_path, **values):
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    card, data = _source_card(tmp_path)
+    _volume, _device, calls = _capture_env(monkeypatch, tmp_path, card, **values)
+    job = _media_job(64 * 512, len(data), target="nas")
+    config = media_worker.nas.load_config(media_worker.NAS_CONFIG_PATH)
+    return handler, replies, state, share, job, config, data
+
+
+def test_nas_job_writes_image_and_unmounts(monkeypatch, tmp_path) -> None:
+    _handler_, _replies, state, share, job, config, data = _nas_capture(monkeypatch, tmp_path)
+    media_worker._run_nas_job(job, config, "printer")
+
+    assert job.state == "bereit", job.error
+    assert job.message == "Image ist auf dem NAS gespeichert."
+    images = sorted(path.name for path in (share / "f").iterdir())
+    assert len(images) == 1 and images[0].startswith("printer-") and images[0].endswith("-sdkarte.img")
+    assert (share / "f" / images[0]).read_bytes() == data[:64 * 512]
+    assert not state["mounted"]
+
+
+def test_nas_job_failure_removes_part_and_unmounts(monkeypatch, tmp_path) -> None:
+    _handler_, _replies, state, share, job, config, _data = _nas_capture(monkeypatch, tmp_path)
+
+    def broken(_output, _chunk):
+        raise OSError("Host is down")
+
+    monkeypatch.setattr(media_worker, "_write_all", broken)
+    media_worker._run_nas_job(job, config, "printer")
+    assert job.state == "fehler" and job.error == "Host is down"
+    assert job.message == "NAS-Image konnte nicht sicher erstellt werden."
+    assert not list((share / "f").iterdir())
+    assert not state["mounted"]
+
+
+def test_nas_job_rejects_missing_folder_without_writing(monkeypatch, tmp_path) -> None:
+    _handler_, _replies, state, share, job, config, _data = _nas_capture(monkeypatch, tmp_path)
+    (share / "f").rmdir()
+    media_worker._run_nas_job(job, config, "printer")
+    assert job.state == "fehler" and job.error == "Sicherungsordner nicht gefunden: f"
+    assert not state["mounted"]
+
+
+def test_nas_job_rejects_too_little_space(monkeypatch, tmp_path) -> None:
+    _handler_, _replies, _state, share, job, config, _data = _nas_capture(monkeypatch, tmp_path)
+    monkeypatch.setattr(media_worker.os, "statvfs", lambda _path: SimpleNamespace(f_bavail=1, f_frsize=512))
+    media_worker._run_nas_job(job, config, "printer")
+    assert job.state == "fehler" and job.error.startswith("Auf dem NAS ist nicht genug freier Platz.")
+    assert not list((share / "f").iterdir())
+
+
+def test_nas_start_requires_confirmation_and_saved_config(monkeypatch, tmp_path) -> None:
+    handler, _replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="Bestätige zuerst"):
+        handler._nas_start({"confirmed": False})
+    with pytest.raises(ValueError, match="Keine NAS-Verbindung gespeichert."):
+        handler._nas_start({"confirmed": True})
+
+
+def test_nas_start_refuses_while_usb_job_runs(monkeypatch, tmp_path) -> None:
+    handler, _replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    monkeypatch.setattr(media_worker, "_disk_size", lambda _path: 96 * 512)
+    monkeypatch.setattr(media_worker, "_capture_size", lambda _path, _size: 64 * 512)
+    _media_job(10, 10).state = "sichern"
+    with pytest.raises(ValueError, match="läuft bereits"):
+        handler._nas_start({"confirmed": True})
+
+
+def test_nas_start_reports_the_share_as_device(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    monkeypatch.setattr(media_worker, "_disk_size", lambda _path: 96 * 512)
+    monkeypatch.setattr(media_worker, "_capture_size", lambda _path, _size: 64 * 512)
+    monkeypatch.setattr(media_worker, "_run_nas_job", lambda *args: None)
+    handler._nas_start({"confirmed": True, "shrink": True, "keep_full": True})
+    assert replies[-1]["device"] == {"path": "//h/S/f", "model": "NAS (SMB)", "size_bytes": 0}
+    assert replies[-1]["job"]["target"] == "nas" and replies[-1]["job"]["shrink"] is True
+
+
+def test_download_refuses_nas_job(monkeypatch, tmp_path) -> None:
+    handler, _replies, _state, _share = _nas_handler(monkeypatch, tmp_path)
+    job = _media_job(10, 10, target="nas")
+    job.state = "bereit"
+    job.files = [{"filename": "a.img", "size_bytes": 10, "sha256": "x"}]
+    with pytest.raises(ValueError, match="NAS-Images liegen bereits auf dem NAS."):
+        handler._download({"filename": "a.img"})
+
+
+def test_shrink_working_copy_lives_next_to_the_full_image(monkeypatch, tmp_path) -> None:
+    seen = []
+    directory = tmp_path / "nasdir"
+    directory.mkdir()
+    full = directory / "a.img"
+    full.write_bytes(b"x" * 100)
+
+    def run(args, timeout=30):
+        seen.append(Path(args[-1]))
+        Path(args[-1]).write_bytes(b"x" * 10)
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(media_worker, "_run", run)
+    job = _media_job(100, 100)
+    result = media_worker._shrink_image(job, full, directory / "a-geshrinkt.img")
+    assert seen[0].parent == directory
+    assert result["size_bytes"] == 10
+
+
+def _nas_with_images(monkeypatch, tmp_path):
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    folder = share / "f"
+    (folder / "a.img").write_bytes(b"a" * 1024)
+    (folder / "keep.img").write_bytes(b"k" * 1024)
+    (folder / ".x.img.part").write_bytes(b"p")
+    (folder / "notes.txt").write_text("n")
+    (folder / "b.img").mkdir()
+    monkeypatch.setattr(media_worker, "_listed_images", {})
+    monkeypatch.setattr(media_worker, "_image_classification_cache", {})
+    return handler, replies, state, folder
+
+
+def test_nas_images_lists_images_and_unmounts(monkeypatch, tmp_path) -> None:
+    handler, replies, state, _folder = _nas_with_images(monkeypatch, tmp_path)
+    handler._nas_images({})
+    images = replies[-1]["images"]
+    assert [item["filename"] for item in images] == ["a.img", "keep.img"]
+    assert all(item["location"] == "nas" and "volume" not in item for item in images)
+    assert replies[-1]["display"] == "//h/S/f"
+    assert not state["mounted"]
+
+
+def test_usb_image_scan_keeps_listed_nas_images(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, _folder = _nas_with_images(monkeypatch, tmp_path)
+    handler._nas_images({})
+    nas_id = replies[-1]["images"][0]["id"]
+    monkeypatch.setattr(media_worker, "_images_cache", None)
+    monkeypatch.setattr(media_worker, "_image_volumes", lambda: [])
+    handler._list_images()
+    assert nas_id in media_worker._listed_images
+
+
+def test_delete_nas_image_removes_only_selected_file(monkeypatch, tmp_path) -> None:
+    handler, replies, state, folder = _nas_with_images(monkeypatch, tmp_path)
+    handler._nas_images({})
+    image_id = replies[-1]["images"][0]["id"]
+    handler._delete_image({"image_id": image_id})
+    assert replies[-1] == {"deleted": "a.img"}
+    assert sorted(path.name for path in folder.iterdir()) == [".x.img.part", "b.img", "keep.img", "notes.txt"]
+    assert image_id not in media_worker._listed_images
+    assert not state["mounted"]
+
+
+def test_delete_nas_image_rejects_changed_connection(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, folder = _nas_with_images(monkeypatch, tmp_path)
+    handler._nas_images({})
+    image_id = replies[-1]["images"][0]["id"]
+    (folder.parent / "g").mkdir()
+    handler._nas_save({**NAS_REQUEST, "folder": "g"})
+    with pytest.raises(ValueError, match="Die NAS-Verbindung wurde geändert. Lade die Liste neu."):
+        handler._delete_image({"image_id": image_id})
+    assert (folder / "a.img").exists()
+
+
+def test_nas_images_while_job_runs_reports_busy(monkeypatch, tmp_path) -> None:
+    handler, replies, state, _folder = _nas_with_images(monkeypatch, tmp_path)
+    _media_job(10, 10, target="nas").state = "sichern"
+    mounts = sum(args[0] == "mount" for args in state["calls"])
+    handler._nas_images({})
+    assert replies[-1] == {"images": [], "busy": True}
+    assert sum(args[0] == "mount" for args in state["calls"]) == mounts
+
+
+def test_shrink_existing_nas_image_writes_next_to_it(monkeypatch, tmp_path) -> None:
+    handler, replies, state, folder = _nas_with_images(monkeypatch, tmp_path)
+    handler._nas_images({})
+    image = dict(media_worker._listed_images[replies[-1]["images"][0]["id"]])
+    image["shrinkability"] = {"status": "shrinkable"}
+    monkeypatch.setattr(media_worker, "_classify_image", lambda *_a, **_k: {"status": "shrinkable"})
+    monkeypatch.setattr(media_worker, "_printer_active", lambda: False)
+
+    def shrink(job, full_path, final_path):
+        assert full_path == folder / "a.img" and final_path.parent == folder
+        final_path.write_bytes(b"s")
+        return {"filename": final_path.name, "size_bytes": 1, "sha256": "x", "kind": "geshrinkt"}
+
+    monkeypatch.setattr(media_worker, "_shrink_image", shrink)
+    job = _media_job(1024, 0, target="nas")
+    media_worker._run_existing_shrink(job, image)
+    assert job.state == "bereit", job.error
+    assert job.message == "Verkleinerte Kopie ist auf dem NAS gespeichert."
+    assert not state["mounted"]
+
+
+def test_is_mounted_reads_mountinfo_without_touching_the_share(monkeypatch, tmp_path) -> None:
+    info = tmp_path / "mountinfo"
+    info.write_text("36 35 0:33 / /run/kibm-media/nas rw,relatime - cifs //h/S rw\n")
+    monkeypatch.setattr(media_worker, "MOUNTINFO_PATH", info)
+    assert media_worker._is_mounted(Path("/run/kibm-media/nas")) is True
+    assert media_worker._is_mounted(Path("/run/kibm-media/volume")) is False
+
+
+def test_stale_nas_mount_is_detached_before_mounting(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    state["mounted"] = True
+    state["calls"].clear()
+    handler._nas_check({})
+    assert replies[-1]["ok"] is True
+    names = [args[0] for args in state["calls"]]
+    assert names.index("umount") < names.index("mount")
+
+
+def test_unmount_failure_does_not_hide_the_real_error(monkeypatch, tmp_path) -> None:
+    handler, replies, state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    (share / "f").rmdir()
+    real_run = media_worker._run
+
+    def run(args, timeout=30):
+        if args[0] == "umount":
+            raise subprocess.CalledProcessError(32, args, stderr="target is busy")
+        return real_run(args, timeout)
+
+    monkeypatch.setattr(media_worker, "_run", run)
+    handler._nas_check({})
+    assert replies[-1] == {"ok": False, "error": "Sicherungsordner nicht gefunden: f"}
+
+
+def test_write_probe_does_not_follow_a_planted_symlink(monkeypatch, tmp_path) -> None:
+    handler, replies, _state, share = _nas_handler(monkeypatch, tmp_path)
+    _save_nas(handler, share)
+    secret = tmp_path / "secret"
+    secret.write_text("keep")
+    (share / "f" / ".kibm-write-test").symlink_to(secret)
+    handler._nas_check({})
+    assert replies[-1]["ok"] is True
+    assert secret.read_text() == "keep"
+    assert (share / "f" / ".kibm-write-test").is_symlink()
+    assert sorted(path.name for path in (share / "f").iterdir()) == [".kibm-write-test"]
+
+
+def test_failed_part_cleanup_keeps_the_original_error(monkeypatch, tmp_path) -> None:
+    _handler_, _replies, _state, _share, job, config, _data = _nas_capture(monkeypatch, tmp_path)
+
+    def broken(_output, _chunk):
+        raise OSError("Host is down")
+
+    real_unlink = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self.name.endswith(".part"):
+            raise OSError("Input/output error")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(media_worker, "_write_all", broken)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    media_worker._run_nas_job(job, config, "printer")
+    assert job.state == "fehler" and job.error == "Host is down"

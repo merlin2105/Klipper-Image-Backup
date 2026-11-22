@@ -9,13 +9,16 @@ User=root
 Group=kibm
 RuntimeDirectory=kibm-media
 RuntimeDirectoryMode=0750
+# Saved NAS connection (nas.json, nas-credentials), root only.
+StateDirectory=kibm-media
+StateDirectoryMode=0700
 ExecStart=/usr/bin/python3 /opt/klipper-image-backup-manager/backend/kibm/media_worker.py
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/run/kibm-media
+ReadWritePaths=/run/kibm-media /var/lib/kibm-media
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
