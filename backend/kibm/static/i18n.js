@@ -1,5 +1,8 @@
 (() => {
   const translations = {
+    "Update wahrscheinlich abgeschlossen": "Update probably finished",
+    "Diese Seite erreicht KIBM seit über einer Minute nicht mehr. Nach einem Update kann KIBM ein neues Sicherheitszertifikat erstellen, das der Browser erst nach dem Neuladen annimmt.": "This page has not reached KIBM for over a minute. An update may create a new security certificate that the browser only accepts after reloading.",
+    "Lade die Seite neu und bestätige die Zertifikatswarnung bei Bedarf einmal. Lädt sie nicht, öffne KIBM über die aktuelle IP-Adresse des Pis.": "Reload the page and confirm the certificate warning once if asked. If it does not load, open KIBM using the Pi's current IP address.",
     "Das NAS hat zu lange nicht geantwortet. Prüfe den Status mit „Erneut prüfen“.": "The NAS took too long to respond. Check the status with “Check again”.",
     "NAS (SMB) · Sicherung": "NAS (SMB) · Backup",
     "Auf Netzwerkfreigabe speichern": "Save to a network share",

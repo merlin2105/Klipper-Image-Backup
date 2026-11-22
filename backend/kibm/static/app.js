@@ -23,6 +23,10 @@ let nasBrowsePath = "";
 let nasImages = [];
 let nasImagesLoaded = false;
 const UPDATE_TARGET_KEY = "kibm-update-target";
+// An update may create a new HTTPS certificate (e.g. after the Pi's IP changed). The
+// open page then cannot reach KIBM until it is reloaded and the certificate accepted.
+const UPDATE_UNREACHABLE_MS = 90 * 1000;
+let updateUnreachableSince = 0;
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -252,12 +256,15 @@ function setUpdateProgress(state, note = "") {
   $("update-progress-failure").hidden = state !== "failed";
   $("update-progress-track").hidden = !running;
   $("update-progress-close").hidden = state !== "failed";
-  $("update-progress-reload").hidden = state !== "success";
+  $("update-progress-reload").hidden = state !== "success" && state !== "unreachable";
   $("update-progress-title").textContent = state === "success"
     ? "Update erfolgreich installiert"
+    : state === "unreachable" ? "Update wahrscheinlich abgeschlossen"
     : state === "failed" ? "Update fehlgeschlagen" : "KIBM-Update läuft";
   $("update-progress-detail").textContent = state === "success"
     ? "Die neue Version ist installiert und KIBM meldet wieder Bereitschaft. Lade die Seite jetzt neu."
+    : state === "unreachable"
+      ? "Diese Seite erreicht KIBM seit über einer Minute nicht mehr. Nach einem Update kann KIBM ein neues Sicherheitszertifikat erstellen, das der Browser erst nach dem Neuladen annimmt."
     : state === "failed"
       ? "Der Installer hat das Update nicht abgeschlossen. Öffne die Logs zur Fehlerdiagnose."
       : state === "restarting"
@@ -265,7 +272,8 @@ function setUpdateProgress(state, note = "") {
         : "Die bestätigte GitHub-Version wird geladen, geprüft und installiert.";
   $("update-progress-note").textContent = note || (state === "running"
     ? "Installation läuft. Bitte dieses Fenster geöffnet lassen."
-    : state === "restarting" ? "Warte auf die Bereitschaftsmeldung des Pis …" : "");
+    : state === "restarting" ? "Warte auf die Bereitschaftsmeldung des Pis …"
+    : state === "unreachable" ? "Lade die Seite neu und bestätige die Zertifikatswarnung bei Bedarf einmal. Lädt sie nicht, öffne KIBM über die aktuelle IP-Adresse des Pis." : "");
 }
 
 function openUpdateProgress(targetCommit) {
@@ -291,6 +299,7 @@ async function refreshUpdateStatus(forceRefresh = false) {
   }
   try {
     const status = await api(forceRefresh ? "/api/update?refresh=true" : "/api/update", { signal: AbortSignal.timeout(30000) });
+    updateUnreachableSince = 0;
     const worker = status.worker || {};
     const button = $("update-button");
     const checkButton = $("check-update-button");
@@ -350,7 +359,12 @@ async function refreshUpdateStatus(forceRefresh = false) {
     const targetCommit = sessionStorage.getItem(UPDATE_TARGET_KEY);
     if (targetCommit) {
       openUpdateProgress(targetCommit);
-      setUpdateProgress("restarting", "KIBM startet seine Dienste neu. Die Verbindung wird automatisch wieder geprüft.");
+      if (!updateUnreachableSince) updateUnreachableSince = Date.now();
+      if (Date.now() - updateUnreachableSince >= UPDATE_UNREACHABLE_MS) {
+        setUpdateProgress("unreachable");
+      } else {
+        setUpdateProgress("restarting", "KIBM startet seine Dienste neu. Die Verbindung wird automatisch wieder geprüft.");
+      }
       scheduleUpdatePoll(3000);
       return;
     }

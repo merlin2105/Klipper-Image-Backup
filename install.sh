@@ -226,9 +226,16 @@ for package in cifs-utils smbclient avahi-utils; do
     apt-get update || true
     apt_updated=true
   fi
-  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "${package}"; then
-    echo "Hinweis: ${package} konnte nicht installiert werden. KIBM wird trotzdem aktualisiert; die NAS-Sicherung steht damit nur eingeschränkt zur Verfügung." >&2
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y "${package}"; then
+    continue
   fi
+  # The security archive may have dropped the newest build; the release's own
+  # archive often still has one that matches the installed libraries.
+  codename=$( (. /etc/os-release && echo "${VERSION_CODENAME:-}") 2>/dev/null || true)
+  if [[ -n ${codename} ]] && DEBIAN_FRONTEND=noninteractive apt-get install -y -t "${codename}" "${package}"; then
+    continue
+  fi
+  echo "Hinweis: ${package} konnte nicht installiert werden. KIBM wird trotzdem aktualisiert; die NAS-Sicherung steht damit nur eingeschränkt zur Verfügung." >&2
 done
 if ! modprobe loop; then
   echo "Das Kernel-Loop-Gerät für PiShrink konnte nicht geladen werden." >&2
