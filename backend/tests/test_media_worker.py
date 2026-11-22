@@ -963,3 +963,19 @@ def test_nas_shares_without_smbclient_asks_for_manual_share(monkeypatch, tmp_pat
     with pytest.raises(ValueError, match="^Die Freigabenliste ist auf diesem System nicht verfügbar"):
         handler._nas_shares({"server": "h", "username": "u", "password": "geheim"})
     assert not list((tmp_path / "run").iterdir())
+
+
+def test_worker_loads_as_a_plain_script_like_systemd_starts_it() -> None:
+    # systemd runs media_worker.py directly, so its sibling modules come from the
+    # importlib fallback, not from the kibm package.
+    import sys
+
+    script = Path(media_worker.__file__)
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import runpy, sys; ns = runpy.run_path(sys.argv[1], run_name='kibm_worker_check'); "
+         "assert ns['nas'].NasConfig('h', 'S', 'u', '', '').display() == '//h/S'",
+         str(script)],
+        capture_output=True, text=True, timeout=30, cwd="/",
+    )
+    assert result.returncode == 0, result.stderr

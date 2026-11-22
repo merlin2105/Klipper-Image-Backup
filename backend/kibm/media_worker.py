@@ -14,6 +14,7 @@ import socketserver
 import stat
 import struct
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -33,6 +34,8 @@ except ImportError:  # started as a script by systemd: load the sibling modules 
     def _sibling(name: str) -> Any:
         spec = importlib.util.spec_from_file_location(f"kibm_{name}", Path(__file__).with_name(f"{name}.py"))
         module = importlib.util.module_from_spec(spec)
+        # dataclasses look up their module in sys.modules while the class is created.
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
 
