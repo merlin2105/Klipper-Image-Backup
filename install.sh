@@ -72,7 +72,8 @@ cleanup_install() {
 trap cleanup_install EXIT
 
 check_kibm_readiness() {
-  python3 - "$printer_ip" <<'PY'
+  # Also used when rolling back after an early failure, before printer_ip is known.
+  python3 - "${printer_ip:-127.0.0.1}" <<'PY'
 import json
 import ssl
 import sys
@@ -204,15 +205,31 @@ restore_previous_install() {
 
 install_step="Systempakete installieren"
 missing_packages=()
-for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux mount udev kmod curl git openssh-client cifs-utils smbclient avahi-utils; do
+for package in python3 python3-venv python3-pip python3-pam openssl exfatprogs parted e2fsprogs util-linux mount udev kmod curl git openssh-client; do
   if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -q 'install ok installed'; then
     missing_packages+=("${package}")
   fi
 done
+apt_updated=false
 if (( ${#missing_packages[@]} )); then
   apt-get update
+  apt_updated=true
   DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
 fi
+# NAS backup tools are optional: on an outdated release (e.g. Debian 11 after its
+# support ended) the archive may no longer serve them, and KIBM must still update.
+for package in cifs-utils smbclient avahi-utils; do
+  if dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -q 'install ok installed'; then
+    continue
+  fi
+  if [[ ${apt_updated} != true ]]; then
+    apt-get update || true
+    apt_updated=true
+  fi
+  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "${package}"; then
+    echo "Hinweis: ${package} konnte nicht installiert werden. KIBM wird trotzdem aktualisiert; die NAS-Sicherung steht damit nur eingeschränkt zur Verfügung." >&2
+  fi
+done
 if ! modprobe loop; then
   echo "Das Kernel-Loop-Gerät für PiShrink konnte nicht geladen werden." >&2
   exit 1

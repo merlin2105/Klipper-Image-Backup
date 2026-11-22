@@ -1388,7 +1388,7 @@ class MediaHandler(socketserver.StreamRequestHandler):
             try:
                 output = _run(["smbclient", "-g", "-L", f"//{config.server}", "-A", str(credentials)], timeout=15).stdout
             except FileNotFoundError:
-                raise ValueError("smbclient ist nicht installiert. Installiere KIBM erneut.") from None
+                raise ValueError("Die Freigabenliste ist auf diesem System nicht verfügbar (smbclient fehlt). Gib den Freigabenamen von Hand ein.") from None
             except subprocess.TimeoutExpired:
                 raise ValueError(nas.mount_error("", timed_out=True)) from None
             except subprocess.CalledProcessError as exc:

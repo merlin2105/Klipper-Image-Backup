@@ -951,3 +951,15 @@ def test_failed_part_cleanup_keeps_the_original_error(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(Path, "unlink", unlink)
     media_worker._run_nas_job(job, config, "printer")
     assert job.state == "fehler" and job.error == "Host is down"
+
+
+def test_nas_shares_without_smbclient_asks_for_manual_share(monkeypatch, tmp_path) -> None:
+    handler, _replies, _state, _share = _nas_handler(monkeypatch, tmp_path)
+
+    def run(args, timeout=30):
+        raise FileNotFoundError(2, "No such file or directory", args[0])
+
+    monkeypatch.setattr(media_worker, "_run", run)
+    with pytest.raises(ValueError, match="^Die Freigabenliste ist auf diesem System nicht verfügbar"):
+        handler._nas_shares({"server": "h", "username": "u", "password": "geheim"})
+    assert not list((tmp_path / "run").iterdir())

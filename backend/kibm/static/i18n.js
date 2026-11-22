@@ -72,7 +72,7 @@
     "Keine Schreibrechte im Sicherungsordner.": "No write permission in the backup folder.",
     "Ein Ordner mit diesem Namen existiert bereits.": "A folder with this name already exists.",
     "Bitte IP-Adresse oder Name des NAS angeben.": "Please enter the NAS IP address or name.",
-    "smbclient ist nicht installiert. Installiere KIBM erneut.": "smbclient is not installed. Reinstall KIBM.",
+    "Die Freigabenliste ist auf diesem System nicht verfügbar (smbclient fehlt). Gib den Freigabenamen von Hand ein.": "The share list is not available on this system (smbclient is missing). Enter the share name manually.",
     "Die Freigaben des NAS konnten nicht abgefragt werden.": "The shares of the NAS could not be listed.",
     "Vollständiges Karten-Image wird auf das NAS geschrieben.": "Writing full card image to the NAS.",
     "Geschriebenes Image wird vom NAS zurückgelesen und geprüft.": "Reading back and verifying the written image from the NAS.",
